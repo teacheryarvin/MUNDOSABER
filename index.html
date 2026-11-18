@@ -392,6 +392,8 @@ SEED.forEach(r => { r.bimestre = BIM_OF[r.area + '|' + r.tema] || 1; });
 
 /* ---------- almacenamiento (local o Firebase) ---------- */
 const loadScript = src => new Promise((ok, err) => { const s = document.createElement('script'); const t = setTimeout(() => err(new Error('Tiempo agotado: ' + src)), 10000); s.src = src; s.onload = () => { clearTimeout(t); ok(); }; s.onerror = () => { clearTimeout(t); err(new Error('No cargó ' + src)); }; document.head.appendChild(s); });
+const packItems = items => ({ json: JSON.stringify(items) });
+const unpackItems = d => { d = d || {}; if (typeof d.json === 'string') { try { return JSON.parse(d.json); } catch (e) { return []; } } return d.items || []; };
 const Store = {
   mode: 'local', db: null, rtdb: null, _rk: {}, _allc: null,
   async init() {
@@ -421,22 +423,22 @@ const Store = {
       return { retos: cache.retos, lecciones: cache.lecciones, juegos: cache.juegos, config: this._cfgOf(cfg) };
     const all = await this.db.collection('contenido').get();
     let retos = [], lecciones = [], juegos = [];
-    all.forEach(d => { const items = d.data().items || []; if (d.id.startsWith('retos_')) retos = retos.concat(items); else if (d.id === 'lecciones') lecciones = items; else if (d.id === 'juegos') juegos = items; });
+    all.forEach(d => { const items = unpackItems(d.data()); if (d.id.startsWith('retos_')) retos = retos.concat(items); else if (d.id === 'lecciones') lecciones = items; else if (d.id === 'juegos') juegos = items; });
     this._set('ms_cache', { v: { retos: ver.retos, lecciones: ver.lecciones, juegos: ver.juegos }, retos, lecciones, juegos });
     return { retos, lecciones, juegos, config: this._cfgOf(cfg) };
   },
   _cfgOf(c) { return { bimestreActual: c.bimestreActual || 1, abrirTodos: !!c.abrirTodos, chat: Object.assign({ seccion: true, grado: true, colegio: false, presencia: true }, c.chat || {}) }; },
   async _seedOnline(cfg) {
     const col = this.db.collection('contenido'), existing = {};
-    if (cfg.seedv) { const all = await col.get(); all.forEach(d => { existing[d.id] = d.data().items || []; }); }
+    if (cfg.seedv) { const all = await col.get(); all.forEach(d => { existing[d.id] = unpackItems(d.data()); }); }
     const byArea = {}; AREAS.forEach(a => { byArea[a.id] = []; }); SEED.forEach(r => { if (byArea[r.area]) byArea[r.area].push(r); });
     const ops = [];
     AREAS.forEach(a => {
       const have = existing['retos_' + a.id] || [], ids = new Set(have.map(r => r.id)), add = byArea[a.id].filter(r => !ids.has(r.id));
-      if (add.length || !cfg.seedv) ops.push(col.doc('retos_' + a.id).set({ items: have.concat(add) }));
+      if (add.length || !cfg.seedv) ops.push(col.doc('retos_' + a.id).set(packItems(have.concat(add))));
     });
-    if (!existing.lecciones) ops.push(col.doc('lecciones').set({ items: LESS_SEED }));
-    if (!existing.juegos) ops.push(col.doc('juegos').set({ items: JUEGOS_SEED }));
+    if (!existing.lecciones) ops.push(col.doc('lecciones').set(packItems(LESS_SEED)));
+    if (!existing.juegos) ops.push(col.doc('juegos').set(packItems(JUEGOS_SEED)));
     await Promise.all(ops);
     const v = cfg.ver || {}, out = Object.assign({}, cfg, { seedv: SEED_VERSION, ver: { retos: (v.retos || 0) + 1, lecciones: (v.lecciones || 0) + 1, juegos: (v.juegos || 0) + 1 } });
     await this.db.collection('config').doc('main').set(out, { merge: true });
@@ -444,7 +446,7 @@ const Store = {
   },
   async _mut(docId, fn) {
     const ref = this.db.collection('contenido').doc(docId);
-    await this.db.runTransaction(async tx => { const s = await tx.get(ref); const items = s.exists ? (s.data().items || []) : []; tx.set(ref, { items: fn(items) }); });
+    await this.db.runTransaction(async tx => { const s = await tx.get(ref); const items = s.exists ? unpackItems(s.data()) : []; tx.set(ref, packItems(fn(items))); });
   },
   _bump(kind) { return this.db.collection('config').doc('main').update({ ['ver.' + kind]: firebase.firestore.FieldValue.increment(1) }); },
 
