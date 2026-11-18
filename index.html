@@ -1299,7 +1299,38 @@ BK('rel', 4, ALL, 'Sacramentos', [
   ['Existen siete sacramentos en la Iglesia católica.', true, 'Son siete.']
 ]);
 
-const SEED_VERSION = 2;
+/* ---------------- COMUNICACIÓN · 3.er grado · Tildación general ---------------- */
+BK('com', 1, [3], 'Tildación general', [
+  ['En una palabra aguda, ¿en qué sílaba cae la fuerza de voz?', ['En la última sílaba', 'En la penúltima', 'En la antepenúltima', 'En la anterior a la antepenúltima'], 0, 'Aguda: el acento cae en la última sílaba (ca-FÉ, can-CIÓN).'],
+  ['¿Cuál de estas palabras es aguda?', ['plato', 'reloj', 'casa', 'libro'], 1, 're-LOJ: la fuerza de voz cae en la última sílaba. No lleva tilde porque termina en j.'],
+  ['Las palabras agudas llevan tilde cuando terminan en n, s o vocal.', true, 'Ejemplos: ca-FÉ, can-CIÓN, a-DIÓS.'],
+  ['¿Cuál palabra aguda está bien escrita?', ['camion', 'camión', 'cámion', 'camiòn'], 1, 'ca-MIÓN es aguda y termina en n, por eso lleva tilde en la última sílaba.'],
+  ['¿Por qué «ciudad» no lleva tilde?', ['Es aguda y termina en d', 'Es grave y termina en d', 'Es esdrújula', 'Es sobresdrújula'], 0, 'ciu-DAD es aguda, pero no termina en n, s ni vocal: no se tilda.', 2],
+  ['Se escribe SIN tilde la palabra…', ['corazón', 'pared', 'fácil', 'azúcar'], 1, 'pa-RED es aguda y termina en d. Las otras llevan tilde: co-ra-ZÓN, FÁ-cil, a-ZÚ-car.', 2],
+  ['«Mamá» lleva tilde porque es aguda y termina en vocal.', true, 'ma-MÁ: aguda terminada en vocal se tilda.'],
+  ['En una palabra grave (llana), ¿en qué sílaba cae la fuerza de voz?', ['En la última', 'En la penúltima', 'En la antepenúltima', 'En la anterior a la antepenúltima'], 1, 'Grave o llana: el acento cae en la penúltima sílaba (ME-sa, LÁ-piz).'],
+  ['Las palabras graves llevan tilde cuando NO terminan en n, s o vocal.', true, 'Ejemplos: ÁR-bol, LÁ-piz, CÁR-cel. Pero: ME-sa, e-XA-men, LU-nes no se tildan.'],
+  ['¿Cuál palabra grave lleva tilde?', ['árbol', 'mesa', 'cantaron', 'examen'], 0, 'ÁR-bol es grave y termina en l: lleva tilde. Las otras terminan en vocal o n.'],
+  ['¿Cuál palabra está bien escrita?', ['lapiz', 'lápiz', 'lapíz', 'làpiz'], 1, 'LÁ-piz es grave y termina en z: lleva tilde en la penúltima sílaba.'],
+  ['«Cárcel» es una palabra…', ['aguda', 'grave (llana)', 'esdrújula', 'sobresdrújula'], 1, 'CÁR-cel: el acento cae en la penúltima sílaba; se tilda porque termina en l.', 2],
+  ['«Joven» no lleva tilde porque es grave y termina en n.', true, 'JO-ven: grave terminada en n no se tilda.'],
+  ['«Tórax» lleva tilde porque es…', ['grave y termina en una consonante distinta de n o s', 'aguda y termina en vocal', 'esdrújula', 'aguda y termina en n'], 0, 'TÓ-rax: grave terminada en x (no es n ni s), por eso se tilda.', 3],
+  ['Las palabras esdrújulas…', ['siempre llevan tilde', 'nunca llevan tilde', 'llevan tilde solo si terminan en n', 'llevan tilde solo si terminan en vocal'], 0, 'En las esdrújulas el acento cae en la antepenúltima sílaba y siempre se tilda.'],
+  ['¿Cuál de estas palabras es esdrújula?', ['teléfono', 'cantar', 'camino', 'pared'], 0, 'te-LÉ-fo-no: el acento cae en la antepenúltima sílaba.'],
+  ['¿Cuál palabra está bien escrita?', ['musica', 'música', 'músíca', 'musíca'], 1, 'MÚ-si-ca es esdrújula y siempre se tilda.'],
+  ['«Murciélago» es una palabra…', ['aguda', 'grave (llana)', 'esdrújula', 'sobresdrújula'], 2, 'mur-CIÉ-la-go: el acento cae en la antepenúltima sílaba (cié).', 2],
+  ['¿Cuántas sílabas tiene la palabra «murciélago»?', 4, 'Se separa mur-cié-la-go. «ié» es un diptongo y forma una sola sílaba.', 2],
+  ['En «teléfono», ¿qué número de sílaba (contando desde la izquierda) lleva la fuerza de voz?', 2, 'te-LÉ-fo-no: la fuerza de voz cae en la segunda sílaba.'],
+  ['El plural «exámenes» lleva tilde porque pasa a ser esdrújula.', true, 'e-XÁ-me-nes: el acento cae en la antepenúltima sílaba. El singular «examen» es grave y no se tilda.', 3],
+  ['En una palabra sobresdrújula, ¿en qué sílaba cae la fuerza de voz?', ['Antes de la antepenúltima', 'En la antepenúltima', 'En la penúltima', 'En la última'], 0, 'Sobresdrújula: el acento cae antes de la antepenúltima sílaba (CÓM-pra-me-lo).', 2],
+  ['¿Cuál de estas palabras es sobresdrújula?', ['cómpramelo', 'compramos', 'cómpralo', 'compraron'], 0, 'CÓM-pra-me-lo: el acento está en la cuarta sílaba contando desde el final.', 2],
+  ['Las palabras sobresdrújulas siempre llevan tilde.', true, 'Muchas son verbos con pronombres: dígamelo, llévatelo, cuéntamelo.', 2],
+  ['¿Cuál palabra está bien escrita?', ['dígamelo', 'digamelo', 'digámelo', 'digamélo'], 0, 'DÍ-ga-me-lo es sobresdrújula: se tilda en la sílaba tónica.', 3],
+  ['«Después» es una palabra…', ['aguda con tilde', 'grave con tilde', 'esdrújula', 'aguda sin tilde'], 0, 'des-PUÉS: aguda terminada en s, por eso se tilda.', 2],
+  ['«Lápices» lleva tilde porque es esdrújula.', true, 'LÁ-pi-ces: el acento cae en la antepenúltima sílaba. El singular «lápiz» es grave terminada en z.', 3]
+]);
+
+const SEED_VERSION = 3;
 
 /* =====================================================================
    MI CIUDAD · recursos, catálogo de construcciones y escenario
@@ -2199,6 +2230,29 @@ const GEN = {
     if (Math.random() < 0.5) return mcqFrom(`¿Qué significa «${en}» en español?`, es, others.slice(0, 3).map(f => f[1]), `${en} = ${es}.`, 1);
     return mcqFrom(`¿Cómo se dice «${es}» en inglés?`, en, others.slice(0, 3).map(f => f[0]), `${es} = ${en}.`, 1);
   },
+  'com|Tildación general': () => {
+    const L = ['can-CIÓN', 'ca-FÉ', 'ja-MÁS', 'tam-BIÉN', 'ca-MIÓN', 'so-FÁ', 'co-ra-ZÓN', 'bal-CÓN', 'a-VIÓN', 'des-PUÉS', 'ma-MÁ', 'pa-PÁ', 'a-de-MÁS', 'le-ÓN', 'ja-ba-LÍ', 'a-QUÍ', 'sa-LÓN',
+      're-LOJ', 'ciu-DAD', 'pa-RED', 'fe-LIZ', 'a-ni-MAL', 'doc-TOR', 'ver-DAD', 'a-MOR', 'co-LOR', 'sa-LUD', 'ca-PAZ', 'u-ni-DAD',
+      'ÁR-bol', 'LÁ-piz', 'CÁR-cel', 'FÁ-cil', 'Ú-til', 'di-FÍ-cil', 'a-ZÚ-car', 'CRÁ-ter', 'MÓ-vil', 'DÉ-bil', 'ÁN-gel', 'ca-RÁC-ter', 'MÁR-mol', 'FÚT-bol',
+      'ME-sa', 'LI-bro', 'ca-MI-no', 'e-XA-men', 'JO-ven', 'CA-sa', 'za-PA-tos', 'can-TA-ron', 'LU-nes', 'o-RI-gen', 'CRI-men', 'MA-pa',
+      'te-LÉ-fo-no', 'MÚ-si-ca', 'mur-CIÉ-la-go', 'PÁ-ja-ro', 'PLÁ-ta-no', 'NÚ-me-ro', 'CÁS-ca-ra', 'PÁ-gi-na', 'MÉ-di-co', 'SÍ-la-ba', 'PÉ-ta-lo', 'ki-LÓ-me-tro', 'LÁM-pa-ra',
+      'DÍ-ga-me-lo', 'CÓM-pra-me-lo', 'LLÉ-va-te-lo', 'CUÉN-ta-me-lo', 'de-VUÉL-ve-me-lo', 'ex-PLÍ-ca-se-lo'];
+    const parts = pick(L).split('-'), word = parts.join('').toLowerCase(), n = parts.length;
+    const k = parts.findIndex(x => x !== x.toLowerCase()), pos = n - k, tilde = /[áéíóú]/.test(word);
+    const kind = pos === 1 ? 'aguda' : pos === 2 ? 'grave' : pos === 3 ? 'esdrújula' : 'sobresdrújula';
+    const LAB = { aguda: 'Aguda', grave: 'Grave (llana)', 'esdrújula': 'Esdrújula', sobresdrújula: 'Sobresdrújula' };
+    const why = { aguda: tilde ? 'Es aguda y termina en n, s o vocal: lleva tilde.' : 'Es aguda, pero no termina en n, s ni vocal: no lleva tilde.',
+      grave: tilde ? 'Es grave y no termina en n, s ni vocal: lleva tilde.' : 'Es grave y termina en n, s o vocal: no lleva tilde.',
+      'esdrújula': 'Las esdrújulas siempre llevan tilde.', sobresdrújula: 'Las sobresdrújulas siempre llevan tilde.' }[kind];
+    const sil = parts.join('-'), dif = pos >= 4 ? 3 : pos === 3 ? 2 : tilde ? 2 : 1;
+    const ACC = { 'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u' }, ADD = { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú' };
+    const base = word.replace(/[áéíóú]/g, c => ACC[c]), wrongs = base !== word ? [base] : [];
+    shuffle([...base].map((c, i) => 'aeiou'.includes(c) ? i : -1).filter(i => i >= 0)).forEach(i => { const v = base.slice(0, i) + ADD[base[i]] + base.slice(i + 1); if (v !== word) wrongs.push(v); });
+    if (Math.random() < 0.5 || wrongs.length < 3) {
+      return mcqFrom(`¿Cómo se clasifica «${word}» según su sílaba tónica?`, LAB[kind], Object.keys(LAB).filter(x => x !== kind).map(x => LAB[x]), `${sil}: la sílaba tónica está en la posición ${pos} contando desde el final. ${why}`, dif);
+    }
+    return mcqFrom(`La palabra ${kind} «${base}», ¿cómo se escribe correctamente?`, word, wrongs, `${sil}. ${why}`, dif);
+  },
   'com|Sinónimos y antónimos': () => {
     const SIN = [['veloz', 'rápido'], ['grande', 'enorme'], ['feliz', 'contento'], ['bonito', 'hermoso'], ['difícil', 'complicado'], ['tranquilo', 'sereno'], ['valiente', 'audaz'], ['inteligente', 'listo']];
     const ANT = [['alto', 'bajo'], ['generoso', 'egoísta'], ['valiente', 'cobarde'], ['rápido', 'lento'], ['limpio', 'sucio'], ['fuerte', 'débil'], ['antiguo', 'moderno'], ['alegre', 'triste']];
@@ -2223,7 +2277,8 @@ const LESS_SEED = [
   { id: 'l7', area: 'ing', grados: [3, 4, 5], tema: 'Past simple', contenido: 'El past simple habla de acciones terminadas en el pasado: Yesterday I watched a movie.\n\nVerbos regulares: agregan -ed (watch → watched).\n\nVerbos irregulares: cambian de forma (go → went, eat → ate, see → saw). Hay que aprenderlos.\n\nNegativa y pregunta: did + verbo base. She did not come. Did you see it?' },
   { id: 'l8', area: 'cyt', grados: [1, 2], tema: 'La célula', contenido: 'La célula es la unidad básica de los seres vivos. Algunos seres tienen una sola célula y otros, millones.\n\nPartes principales: membrana (protege y controla lo que entra y sale), citoplasma (donde ocurren muchas reacciones) y núcleo (contiene la información genética).\n\nLas mitocondrias producen energía. Las células vegetales, además, tienen pared celular y cloroplastos para hacer la fotosíntesis.' },
   { id: 'l9', area: 'dpcc', grados: [1, 2, 3, 4, 5], tema: 'Convivencia y derechos', contenido: 'Convivir es vivir con otras personas respetando sus derechos y cumpliendo nuestros deberes.\n\nTodas las personas tenemos los mismos derechos, sin importar origen, lengua, cultura, género o ideas.\n\nLos conflictos son normales. Se resuelven con diálogo, escucha activa y empatía, sin violencia.\n\nSi ves discriminación, no la apoyes: incluye, acompaña a la persona afectada y avisa a un adulto de confianza.' },
-  { id: 'l10', area: 'soc', grados: [1, 2, 3], tema: 'Historia del Perú', contenido: 'Caral, en el valle de Supe, es una de las ciudades más antiguas de América, con unos 5000 años de antigüedad.\n\nLa independencia del Perú fue proclamada por José de San Martín en Lima el 28 de julio de 1821.\n\nTener presentes fechas y lugares ayuda a ordenar la historia en una línea de tiempo.' }
+  { id: 'l10', area: 'soc', grados: [1, 2, 3], tema: 'Historia del Perú', contenido: 'Caral, en el valle de Supe, es una de las ciudades más antiguas de América, con unos 5000 años de antigüedad.\n\nLa independencia del Perú fue proclamada por José de San Martín en Lima el 28 de julio de 1821.\n\nTener presentes fechas y lugares ayuda a ordenar la historia en una línea de tiempo.' },
+  { id: 'l11', area: 'com', grados: [3], tema: 'Tildación general', contenido: 'Toda palabra tiene una sílaba tónica: la que se pronuncia con más fuerza. Según dónde cae, la palabra es:\n\nAGUDA: la fuerza cae en la última sílaba (ca-FÉ, can-CIÓN, pa-RED). Lleva tilde si termina en n, s o vocal.\n\nGRAVE o LLANA: la fuerza cae en la penúltima sílaba (ME-sa, e-XA-men, ÁR-bol, LÁ-piz). Lleva tilde si NO termina en n, s o vocal.\n\nESDRÚJULA: la fuerza cae en la antepenúltima sílaba (te-LÉ-fo-no, MÚ-si-ca). Siempre lleva tilde.\n\nSOBRESDRÚJULA: la fuerza cae antes de la antepenúltima sílaba (CÓM-pra-me-lo, DÍ-ga-me-lo). Siempre lleva tilde.\n\nTruco: separa la palabra en sílabas, busca la sílaba tónica y cuenta desde el final: 1 = aguda, 2 = grave, 3 = esdrújula, 4 o más = sobresdrújula.' }
 ];
 const leccionDe = (areaId, tema) => S.lecciones.find(l => l.area === areaId && l.tema === tema && (l.grados || []).includes(S.me.grado));
 function openLeccion(areaId, tema) {
