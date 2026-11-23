@@ -176,6 +176,20 @@ th{background:var(--soft);position:sticky;top:0}
 .hpbar.low>i{background:var(--bad)}
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-7px)}75%{transform:translateX(7px)}}
 .hit{animation:shake .45s}
+.cr-track{position:relative;display:grid;gap:4px;background:#e4f2cf;border:3px solid var(--ink);border-radius:14px;padding:6px 8px}
+.cr-lane{position:relative;height:38px;border-bottom:3px dashed #9fb08a}
+.cr-car{position:absolute;top:0;font-size:26px;line-height:34px;transition:left .8s ease}
+.cr-name{position:absolute;left:4px;bottom:0;font-size:11px;font-weight:800;opacity:.6}
+.cr-fin{position:absolute;right:8px;top:6px;bottom:6px;width:10px;border-radius:4px;background:repeating-linear-gradient(#111 0 8px,#fff 8px 16px);font-size:0}
+.at-area{position:relative;height:320px;overflow:hidden;border:3px solid var(--ink);border-radius:14px;background:linear-gradient(#cfe8ff,#f4fbff);touch-action:none;user-select:none;cursor:pointer}
+.at-card{position:absolute;top:0;height:64px;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:800;font-size:13px;line-height:1.15;padding:4px;background:#fff;border:3px solid var(--ink);border-radius:12px;box-shadow:0 3px 0 var(--ink);transform:translateY(-140px);overflow:hidden}
+.at-card.ok{background:#c8f7c5}
+.at-b{position:absolute;bottom:0;height:60px;display:flex;align-items:center;justify-content:center;font-size:44px;transition:left .12s}
+.lvl{text-align:center;font-weight:800;border:3px solid var(--ink);border-radius:12px;padding:6px 10px;background:#fff}
+.lvl.lv1{background:#ffe0b3}
+.lvl.lv2{background:#2d1b4e;color:#fff;animation:bosspulse 1.4s infinite}
+@keyframes bosspulse{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+.pws{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .vs{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -1909,6 +1923,7 @@ $('#modalCard').addEventListener('click', e => {
     case 'btAns': btAnswer(d.v); break;
     case 'btNumOk': btAnswer($('#btNum').value); break;
     case 'btNext': btAdvance(); break;
+    case 'btPow': btPower(d.v); break;
     case 'btBack': btBack(); break;
     case 'btVolver': if (S.team) { S.team.busy = false; renderTeam(); } break;
     case 'btClean': Store.dAll('battles').then(list => Promise.all(list.filter(b => b.estado === 'fin' || Date.now() - (b.creado || 0) > 86400000).map(b => Store.dDelete('battles', b.id)))).then(() => { toast('Batallas limpiadas.'); tEquipos(); }).catch(() => toast('No se pudo limpiar.')); break;
@@ -1933,6 +1948,7 @@ $('#modalCard').addEventListener('click', e => {
     case 'tmReset': Store.teamPatch(S.team.code, { partida: null }); break;
     case 'tmDel': if (confirm('¿Disolver este equipo?')) Store.teamDelete(d.c).then(() => { toast('Equipo disuelto.'); tEquipos(); }).catch(() => toast('No se pudo disolver.')); break;
     case 'mgL': S.mg.sel = +d.i; renderPares(); break;
+    case 'crOpt': crAnswer(d.v); break;
     case 'mgR': mgRight(+d.i); break;
     case 'mgC': mgCard(+d.i); break;
     case 'mgK': mgKey(d.k); break;
@@ -2889,8 +2905,97 @@ function miniResult(g, emoji, title, stars, lines) {
 function startMini(kind, areaId) {
   if (kind === 'pares') startPares(areaId); else if (kind === 'memoria') startMemoria(areaId); else if (kind === 'palabra') startPalabra(areaId);
   else if (kind === 'orden') startOrden(areaId); else if (kind === 'reloj') startReloj(areaId);
+  else if (kind === 'carrera') startCarrera(areaId); else if (kind === 'atrapa') startAtrapa(areaId);
 }
 const starsByErrors = e => e === 0 ? 3 : e <= 2 ? 2 : e <= 4 ? 1 : 0;
+
+/* ---------- Carrera del saber ---------- */
+function mgQs(areaId, n) { const q = buildTeamQs(areaId, n + 4); return q ? q.filter(x => x.tipo === 'mcq' || x.tipo === 'vf').slice(0, n) : []; }
+function mgStat(q, ok) { const me = S.me, k = tkey(q.area, q.tema), st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; persist(); }
+function startCarrera(areaId) {
+  const qs = mgQs(areaId, 8); if (qs.length < 5) { toast('Todavía no hay suficientes retos de esta área para la carrera.'); return; }
+  const bots = shuffle([['🚙', 'Turbo'], ['🛻', 'Nitro'], ['🚕', 'Rayo']]);
+  S.mg = { type: 'carrera', areaId, qs, i: 0, pos: [0, 0, 0, 0], names: ['Tú'].concat(bots.map(b => b[1])), icons: ['🏎️'].concat(bots.map(b => b[0])), streak: 0, ok: 0, answered: false, t: 15, lv0: levelOf(S.me.xp) };
+  renderCarrera();
+}
+const crLeft = p => (3 + Math.min(p, 100) * 0.82) + '%';
+function renderCarrera() {
+  const g = S.mg; if (!g || g.type !== 'carrera') return; const a = areaById(g.areaId), q = g.qs[g.i];
+  const lanes = g.pos.map((p, k) => `<div class="cr-lane"><span class="cr-car" id="crC${k}" style="left:${crLeft(p)}">${g.icons[k]}</span><span class="cr-name">${esc(g.names[k])}</span></div>`).join('');
+  const opts = q.tipo === 'mcq' ? q.opciones.map((o, idx) => `<button class="opt" data-m="crOpt" data-v="${idx}">${esc(o)}</button>`) : [['true', '✔ Verdadero'], ['false', '✘ Falso']].map(([v, t]) => `<button class="opt" data-m="crOpt" data-v="${v}">${t}</button>`);
+  openModal(`${mhead('🏎️', 'Carrera del saber')}<div class="mbody"><div class="cr-track">${lanes}<div class="cr-fin">🏁</div></div>
+    <div class="qhead"><span class="mute">Pregunta ${g.i + 1} de ${g.qs.length}${g.streak >= 2 ? ' · 🔥 racha x' + g.streak : ''}</span><b>⏱️ <span id="crT">15</span> s</b></div>
+    <div class="enun">${esc(q.enunciado)}</div><div class="opts">${opts.join('')}</div><div id="crFb"></div></div>`, { color: a.color });
+  clearInterval(S.timer); g.t = 15; g.answered = false;
+  S.timer = setInterval(() => { if (S.mg !== g || g.answered) return; g.t--; const el = $('#crT'); if (el) el.textContent = Math.max(g.t, 0); if (g.t <= 0) crAnswer(null); }, 1000);
+}
+function crAnswer(val) {
+  const g = S.mg; if (!g || g.type !== 'carrera' || g.answered) return; g.answered = true; clearInterval(S.timer);
+  const q = g.qs[g.i], v = val === null ? null : (q.tipo === 'mcq' ? +val : val === 'true'), ok = v !== null && evalAns(q, v);
+  mgStat(q, ok); g.streak = ok ? g.streak + 1 : 0; if (ok) g.ok++;
+  g.pos[0] += ok ? 14 + Math.min(g.streak - 1, 3) * 2 : 3;
+  for (let k = 1; k < 4; k++) g.pos[k] += 7 + Math.floor(Math.random() * 6);
+  beep(ok);
+  g.pos.forEach((p, k) => { const el = $('#crC' + k); if (el) el.style.left = crLeft(p); });
+  document.querySelectorAll('#modalCard .opt').forEach(bn => {
+    const dv = bn.dataset.v, right = q.tipo === 'mcq' ? +dv === q.correcta : (dv === 'true') === q.correcta;
+    if (right) bn.classList.add('ok'); else if (val !== null && dv === String(val)) bn.classList.add('bad'); bn.disabled = true;
+  });
+  const fb = $('#crFb'); if (fb) fb.innerHTML = `<div class="fb ${ok ? 'ok' : 'bad'}"><h3>${ok ? '¡Aceleras! 🏎️💨' : (v === null ? '¡Se acabó el tiempo!' : 'Fallaste: el motor se atasca')}</h3>${ok ? '' : `<div>La respuesta correcta es <b>${esc(correctText(q))}</b>.</div>`}<div style="margin-top:6px">${esc(q.explicacion)}</div></div>`;
+  setTimeout(() => { if (S.mg !== g) return; g.i++; if (g.i >= g.qs.length || g.pos.some(p => p >= 100)) crFinish(g); else renderCarrera(); }, ok ? 1700 : 2800);
+}
+function crFinish(g) {
+  const order = g.pos.map((p, k) => ({ p, k })).sort((x, y) => y.p - x.p), place = order.findIndex(o => o.k === 0) + 1, stars = [3, 2, 1, 0][place - 1];
+  miniResult(g, place === 1 ? '🏆' : '🏁', 'Carrera del saber', stars, [`Llegaste en el puesto <b>${place}</b> de 4 con ${g.ok} aciertos de ${g.qs.length}.`, order.map((o, i) => (i + 1) + '. ' + g.icons[o.k] + ' ' + esc(g.names[o.k])).join(' · ')]);
+}
+
+/* ---------- Atrapa la respuesta ---------- */
+function startAtrapa(areaId) {
+  const qs = mgQs(areaId, 8); if (qs.length < 5) { toast('Todavía no hay suficientes retos de esta área para este juego.'); return; }
+  S.mg = { type: 'atrapa', areaId, qs, i: 0, lives: 3, ok: 0, lane: 1, cards: [], phase: 'play', raf: 0, last: 0, H: 320, lv0: levelOf(S.me.xp) };
+  renderAtrapa();
+}
+function atMove(g, lane) { if (S.mg !== g) return; g.lane = Math.max(0, Math.min(g.n - 1, lane)); const b = $('#atB'); if (b) b.style.left = (g.lane * 100 / g.n) + '%'; }
+function renderAtrapa() {
+  const g = S.mg; if (!g || g.type !== 'atrapa') return; const a = areaById(g.areaId), q = g.qs[g.i];
+  const labels = q.tipo === 'mcq' ? q.opciones : ['✔ Verdadero', '✘ Falso'], n = labels.length, correct = q.tipo === 'mcq' ? q.correcta : (q.correcta ? 0 : 1);
+  g.n = n; g.lane = Math.min(g.lane, n - 1); g.phase = 'play';
+  const base = 38 + g.i * 3;
+  g.cards = labels.map((t, k) => ({ k, y: -70 - Math.random() * 70, v: base * (0.8 + Math.random() * 0.5), ok: k === correct, done: false, landed: false }));
+  openModal(`${mhead('🧺', 'Atrapa la respuesta')}<div class="mbody">
+    <div class="qhead"><span class="mute">Pregunta ${g.i + 1} de ${g.qs.length}</span><b>${'❤️'.repeat(Math.max(g.lives, 0))}${'🖤'.repeat(3 - Math.max(g.lives, 0))} · ✅ ${g.ok}</b></div>
+    <div class="enun">${esc(q.enunciado)}</div>
+    <div id="atArea" class="at-area">${g.cards.map(c => `<div class="at-card" id="atC${c.k}" style="left:calc(${c.k * 100 / n}% + 3px);width:calc(${100 / n}% - 6px)">${esc(labels[c.k])}</div>`).join('')}<div class="at-b" id="atB" style="width:${100 / n}%;left:${g.lane * 100 / n}%">🧺</div></div>
+    <div class="mute" style="text-align:center">Mueve la canasta con ← → o toca un carril. ¡Atrapa SOLO la respuesta correcta!</div><div id="atFb"></div></div>`, { color: a.color });
+  const area = $('#atArea'); area.addEventListener('pointerdown', e => { const r = area.getBoundingClientRect(); atMove(g, Math.floor((e.clientX - r.left) / r.width * g.n)); });
+  if (!g.kh) { g.kh = e => { if (S.mg !== g) { document.removeEventListener('keydown', g.kh); return; } if (e.key === 'ArrowLeft') { atMove(g, g.lane - 1); e.preventDefault(); } else if (e.key === 'ArrowRight') { atMove(g, g.lane + 1); e.preventDefault(); } }; document.addEventListener('keydown', g.kh); }
+  g.last = performance.now(); cancelAnimationFrame(g.raf); g.raf = requestAnimationFrame(t => atLoop(g, t));
+}
+function atLoop(g, now) {
+  if (S.mg !== g || g.type !== 'atrapa') { if (g.kh) document.removeEventListener('keydown', g.kh); return; }
+  const dt = Math.min(0.05, (now - g.last) / 1000); g.last = now;
+  if (g.phase === 'play') {
+    const top = g.H - 60 - 64;
+    for (const c of g.cards) {
+      if (c.done) continue; c.y += c.v * dt; const el = $('#atC' + c.k); if (el) el.style.transform = 'translateY(' + c.y + 'px)';
+      if (c.y >= top && !c.landed) { c.landed = true; if (c.k === g.lane) { c.done = true; atResolve(g, c.ok, c.k); break; } }
+      if (c.y >= g.H) { c.done = true; if (el) el.style.visibility = 'hidden'; if (c.ok) { atResolve(g, false, null); break; } }
+    }
+  }
+  g.raf = requestAnimationFrame(t => atLoop(g, t));
+}
+function atResolve(g, ok, k) {
+  if (g.phase !== 'play') return; g.phase = 'fb'; const q = g.qs[g.i];
+  mgStat(q, ok); if (ok) g.ok++; else g.lives--; beep(ok);
+  g.cards.forEach(c => { const el = $('#atC' + c.k); if (!el) return; el.style.transform = 'translateY(' + Math.min(c.y, g.H - 124) + 'px)'; if (c.ok) el.classList.add('ok'); else el.style.visibility = 'hidden'; });
+  const fb = $('#atFb'); if (fb) fb.innerHTML = `<div class="fb ${ok ? 'ok' : 'bad'}"><h3>${ok ? '¡Atrapada! 🧺' : (k === null ? 'Se escapó la correcta' : 'Atrapaste una incorrecta')}</h3>${ok ? '' : `<div>La respuesta correcta es <b>${esc(correctText(q))}</b>.</div>`}<div style="margin-top:6px">${esc(q.explicacion)}</div></div>`;
+  setTimeout(() => { if (S.mg !== g) return; g.i++; if (g.lives <= 0 || g.i >= g.qs.length) atFinish(g); else renderAtrapa(); }, ok ? 1500 : 2800);
+}
+function atFinish(g) {
+  cancelAnimationFrame(g.raf); if (g.kh) document.removeEventListener('keydown', g.kh);
+  const stars = g.lives <= 0 ? 0 : Math.min(3, g.lives);
+  miniResult(g, g.lives > 0 ? '🧺' : '💥', 'Atrapa la respuesta', stars, [`Atrapaste ${g.ok} de ${g.qs.length} respuestas${g.lives <= 0 ? ' y te quedaste sin vidas' : ''}.`]);
+}
 
 /* ---------- Relacionar ---------- */
 function startPares(areaId) {
@@ -3034,7 +3139,7 @@ function buildPark(root, areaId, a, blds) {
   const grade = S.me.grado, pares = juegosDe(areaId, 'pares'), sec = juegosDe(areaId, 'secuencia');
   const hasWords = pares.some(j => j.items.some(p => WORD_RE.test(p[0])));
   const hasRetos = S.retos.some(r => r.area === areaId && (r.grados || []).includes(grade) && (r.bimestre || 1) <= S.bim);
-  const PARK = [['pares', '🔗', 'Relacionar', pares.length > 0], ['memoria', '🃏', 'Memoria', pares.length > 0], ['palabra', '🔤', 'Palabra', hasWords], ['orden', '🔢', 'Ordenar', sec.length > 0], ['reloj', '⏱️', 'Reloj', hasRetos]];
+  const PARK = [['pares', '🔗', 'Relacionar', pares.length > 0], ['memoria', '🃏', 'Memoria', pares.length > 0], ['palabra', '🔤', 'Palabra', hasWords], ['orden', '🔢', 'Ordenar', sec.length > 0], ['reloj', '⏱️', 'Reloj', hasRetos], ['carrera', '🏎️', 'Carrera', hasRetos], ['atrapa', '🧺', 'Atrapa', hasRetos]];
   PARK.forEach(([id, emoji, label, ok], i) => {
     const ang = (i / PARK.length) * Math.PI * 2 + 0.55, x = Math.cos(ang) * 17, z = Math.sin(ang) * 17;
     const st = new THREE.Group(); st.position.set(x, 0, z); root.add(st);
@@ -3768,6 +3873,10 @@ async function sgClean() {
    deja al otro sin vida o el que tenga más vida al terminar las preguntas.
    ===================================================================== */
 const BT_HP = 100, BT_SECS = 30;
+const BT_LV = [{ n: 'Calentamiento', e: '🔥', m: 1, c: '#ffd6d6' }, { n: 'Combate', e: '⚔️', m: 1.5, c: '#ffc9a8' }, { n: '¡Jefe final!', e: '💀', m: 2, c: '#d9b8ff' }];
+const BT_PW = { doble: ['⚡', 'Doble daño'], escudo: ['🛡️', 'Escudo'], curar: ['💚', 'Curar'] };
+const btLvIdx = (b, i) => { const n = b.niv || [0]; let k = 0; n.forEach((f, j) => { if (i >= f) k = j; }); return Math.min(k, 2); };
+const btCombo = cb => (cb >= 2 ? Math.min(cb - 1, 3) * 5 : 0);
 Object.assign(Store, {
   _dk(col) { return this._get('ms_' + col, {}); },
   async dGet(col, id) {
@@ -3816,24 +3925,25 @@ Object.assign(Store, {
 
 const btSide = b => { const id = S.me.id; return b.A.miembros.some(m => m.id === id) ? 'A' : (b.B && b.B.miembros.some(m => m.id === id) ? 'B' : null); };
 const btMe = (b, side) => b[side].miembros.find(m => m.id === S.me.id);
-const btInfo = d => ({ code: d.code, nombre: d.nombre, lider: d.creador, hp: BT_HP, miembros: d.miembros.map(m => ({ id: m.id, k: m.k, n: m.n, c: m.c })) });
+const btInfo = (d, hp = BT_HP) => ({ cb: 0, used: {}, code: d.code, nombre: d.nombre, lider: d.creador, hp, miembros: d.miembros.map(m => ({ id: m.id, k: m.k, n: m.n, c: m.c })) });
 
 function battlePanel(d) {
   const s = S.team, lead = d.creador === S.me.id;
   if (d.batalla) return `<div class="panel" style="padding:12px;display:grid;gap:8px;background:#ffe9e9"><b>⚔️ ¡Hay una batalla en curso!</b><button class="btn coral" data-m="btEntrar" data-id="${esc(d.batalla)}">Entrar a la batalla</button></div>`;
   if (d.miembros.length < 2) return '<div class="say">⚔️ Para luchar contra otro equipo necesitan ser al menos 2 integrantes.</div>';
   if (!lead) return '<div class="say">⚔️ Tu líder 👑 puede iniciar una batalla contra otro equipo.</div>';
-  return `<div class="panel" style="padding:12px;display:grid;gap:8px;background:#fff5f5"><b>⚔️ Batalla entre equipos</b><p class="mute" style="margin:0">Cada acierto daña al equipo rival. Gana el que deje al otro sin vida o tenga más vida al final.</p><div class="row" style="align-items:end"><div><label for="tmArea2">Área</label><select id="tmArea2">${AREAS.map(a => `<option value="${a.id}" ${s.area === a.id ? 'selected' : ''}>${a.emoji} ${esc(a.nombre)}</option>`).join('')}</select></div><button class="btn coral" data-m="btCrear" style="flex:0 0 auto">Crear batalla</button><button class="btn" data-m="btBuscar" style="flex:0 0 auto">Buscar rival</button></div></div>`;
+  return `<div class="panel" style="padding:12px;display:grid;gap:8px;background:#fff5f5"><b>⚔️ Batalla entre equipos</b><p class="mute" style="margin:0">3 niveles (calentamiento, combate y jefe final con daño x2). Cada acierto daña al rival; las rachas y los poderes ⚡🛡️💚 cambian la batalla.</p><div class="row" style="align-items:end"><div><label for="tmArea2">Área</label><select id="tmArea2">${AREAS.map(a => `<option value="${a.id}" ${s.area === a.id ? 'selected' : ''}>${a.emoji} ${esc(a.nombre)}</option>`).join('')}</select></div><button class="btn coral" data-m="btCrear" style="flex:0 0 auto">Crear batalla</button><button class="btn" data-m="btBuscar" style="flex:0 0 auto">Buscar rival</button></div></div>`;
 }
 async function btCrear() {
   const s = S.team, d = s.data, me = S.me;
   if (!d || d.miembros.length < 2) { toast('Tu equipo necesita al menos 2 integrantes.'); return; }
   if (d.batalla) { toast('Tu equipo ya tiene una batalla.'); return; }
-  const qs = buildTeamQs(s.area, 10); if (!qs) { toast('No hay retos de esta área para tu grado y bimestre.'); return; }
+  const qs = buildTeamQs(s.area, 15); if (!qs) { toast('No hay retos de esta área para tu grado y bimestre.'); return; }
+  qs.sort((a, b) => (a.dificultad || 1) - (b.dificultad || 1)); const nq = qs.length, niv = [0, Math.round(nq / 3), Math.round(2 * nq / 3)], hpMax = nq * 20;
   let id, tries = 0;
   try {
     do { id = genCode(); tries++; } while (tries < 6 && await Store.dGet('battles', id));
-    await Store.dSet('battles', id, { id, area: s.area, estado: 'esperando', creado: Date.now(), host: me.id, grado: me.grado, A: btInfo(d), B: null, pregs: qs, i: 0, t0: 0, resp: {}, rondas: {}, ganador: null });
+    await Store.dSet('battles', id, { id, area: s.area, estado: 'esperando', creado: Date.now(), host: me.id, grado: me.grado, v: 2, hpMax, niv, pw: {}, A: btInfo(d, hpMax), B: null, pregs: qs, i: 0, t0: 0, resp: {}, rondas: {}, ganador: null });
     await Store.teamPatch(d.code, { batalla: id });
   } catch (e) { console.error(e); toast('No se pudo crear la batalla. Revisa tu conexión.'); return; }
   btStart(id);
@@ -3857,7 +3967,7 @@ async function btJoin(id) {
     r = await Store.dMut('battles', id, b => {
       if (b.estado !== 'esperando' || b.B) return { error: 'Esa batalla ya no está disponible.' };
       if (b.A.code === d.code) return { error: 'No puedes pelear contra tu propio equipo.' };
-      b.B = btInfo(d); b.estado = 'listo';
+      b.B = btInfo(d, b.hpMax || BT_HP); b.estado = 'listo';
     });
     if (r.error) { toast(r.error === 'No existe.' ? 'No existe una batalla con ese código.' : r.error); return; }
     await Store.teamPatch(d.code, { batalla: id });
@@ -3897,13 +4007,35 @@ async function btAdvance() {
       if (b.estado !== 'jugando' || b.i !== i) return { error: 'ya avanzó' };
       const resp = (b.resp && b.resp['q' + i]) || {}, cnt = t => t.miembros.filter(m => resp[m.k] && resp[m.k].ok).length;
       const cA = cnt(b.A), cB = cnt(b.B), nA = b.A.miembros.length, nB = b.B.miembros.length;
-      const dmgB = Math.round(cA / nA * 20) + (cA === nA ? 5 : 0), dmgA = Math.round(cB / nB * 20) + (cB === nB ? 5 : 0);
+      const v2 = b.v === 2, mx = b.hpMax || BT_HP, mult = v2 ? BT_LV[btLvIdx(b, i)].m : 1, pw = (b.pw && b.pw['q' + i]) || {};
+      let dmgB = Math.round((Math.round(cA / nA * 20) + (cA === nA ? 5 : 0)) * mult), dmgA = Math.round((Math.round(cB / nB * 20) + (cB === nB ? 5 : 0)) * mult);
+      if (v2) {
+        b.A.cb = cA === nA ? (b.A.cb || 0) + 1 : 0; b.B.cb = cB === nB ? (b.B.cb || 0) + 1 : 0;
+        if (cA === nA) dmgB += btCombo(b.A.cb); if (cB === nB) dmgA += btCombo(b.B.cb);
+        if (pw.A === 'doble') dmgB *= 2; if (pw.B === 'doble') dmgA *= 2;
+        if (pw.A === 'escudo') dmgA = Math.round(dmgA / 2); if (pw.B === 'escudo') dmgB = Math.round(dmgB / 2);
+      }
       b.B.hp = Math.max(0, b.B.hp - dmgB); b.A.hp = Math.max(0, b.A.hp - dmgA);
-      b.rondas = b.rondas || {}; b.rondas['q' + i] = { a: dmgA, b: dmgB };
+      if (v2) { if (pw.A === 'curar') b.A.hp = Math.min(mx, b.A.hp + Math.round(mx * 0.1)); if (pw.B === 'curar') b.B.hp = Math.min(mx, b.B.hp + Math.round(mx * 0.1)); }
+      b.rondas = b.rondas || {}; b.rondas['q' + i] = { a: dmgA, b: dmgB, pa: pw.A || null, pb: pw.B || null };
       b.i = i + 1; b.t0 = Date.now();
       if (b.i >= b.pregs.length || b.A.hp <= 0 || b.B.hp <= 0) { b.estado = 'fin'; b.ganador = b.A.hp > b.B.hp ? 'A' : (b.B.hp > b.A.hp ? 'B' : 'E'); }
     });
   } catch (e) { console.warn(e); }
+}
+async function btPower(pid) {
+  const bt = S.battle; if (!bt || !bt.data || !BT_PW[pid]) return; const b = bt.data, side = btSide(b), i = b.i;
+  if (!side || b.estado !== 'jugando' || b.v !== 2) return;
+  try {
+    const r = await Store.dMut('battles', b.id, x => {
+      if (x.estado !== 'jugando' || x.i !== i) return { error: 'La ronda ya cambió.' };
+      x.pw = x.pw || {}; const cur = x.pw['q' + i] = x.pw['q' + i] || {};
+      if (cur[side]) return { error: 'Tu equipo ya usó un poder en esta ronda.' };
+      x[side].used = x[side].used || {}; if (x[side].used[pid]) return { error: 'Ese poder ya se usó.' };
+      x[side].used[pid] = true; cur[side] = pid;
+    });
+    if (r.error) toast(r.error); else beep(true);
+  } catch (e) { console.warn(e); toast('No se pudo activar el poder.'); }
 }
 async function btAnswer(val) {
   const bt = S.battle; if (!bt || !bt.data || bt.sending) return; const b = bt.data, me = S.me, side = btSide(b), mem = side && btMe(b, side), q = b.pregs[b.i];
@@ -3916,7 +4048,7 @@ async function btAnswer(val) {
   try { await Store.dPatch('battles', b.id, { ['resp.q' + b.i + '.' + mem.k]: { ok, v } }); } catch (e) { console.error(e); toast('No se pudo enviar tu respuesta.'); }
   bt.sending = false;
 }
-const hpBar = (t, label, hit) => { const pct = Math.round(t.hp / BT_HP * 100); return `<div class="${hit ? 'hit' : ''}"><b>${esc(label)}</b> <span class="mute">${esc(t.nombre)}</span><div class="hpbar ${pct <= 30 ? 'low' : ''}"><i style="width:${pct}%"></i></div><div class="mute" style="font-weight:800">❤️ ${t.hp} / ${BT_HP}</div></div>`; };
+const hpBar = (t, label, hit, mx = BT_HP) => { const pct = Math.round(t.hp / mx * 100); return `<div class="${hit ? 'hit' : ''}"><b>${esc(label)}</b> <span class="mute">${esc(t.nombre)}</span><div class="hpbar ${pct <= 30 ? 'low' : ''}"><i style="width:${pct}%"></i></div><div class="mute" style="font-weight:800">❤️ ${t.hp} / ${mx}</div></div>`; };
 function renderBattle() {
   const bt = S.battle, b = bt.data;
   if (!b) { toast('La batalla se canceló.'); btBack(); return; }
@@ -3934,7 +4066,7 @@ function renderBattle() {
   }
   if (b.estado === 'listo') {
     openModal(`${head}<div class="mbody"><div class="vs"><div class="say" style="text-align:center"><b>${esc(b.A.nombre)}</b><br>${b.A.miembros.length} integrantes</div><div class="big">⚔️</div><div class="say" style="text-align:center"><b>${esc(b.B.nombre)}</b><br>${b.B.miembros.length} integrantes</div></div>
-      <h2 style="text-align:center;font-size:26px">¡Prepárense! La batalla empieza en unos segundos…</h2></div>`, { color: '#ffd6d6' });
+      <h2 style="text-align:center;font-size:26px">¡Prepárense! La batalla empieza en unos segundos…</h2>${b.v === 2 ? '<div class="say" style="text-align:center">🔥 Nivel 1 Calentamiento · ⚔️ Nivel 2 Combate (daño x1.5) · 💀 Nivel 3 ¡Jefe final! (daño x2)<br>Cada equipo tiene 3 poderes: ⚡ Doble daño, 🛡️ Escudo y 💚 Curar. ¡Úsenlos con estrategia!</div>' : ''}</div>`, { color: '#ffd6d6' });
     return;
   }
   const prev = bt.lastHp, hitMine = prev && mine.hp < prev[side], hitFoe = prev && rival.hp < prev[foe];
@@ -3943,8 +4075,11 @@ function renderBattle() {
     const mem = btMe(b, side), q = b.pregs[b.i], resp = (b.resp && b.resp['q' + b.i]) || {}, mineA = mem ? resp[mem.k] : null;
     const myDone = mine.miembros.map(m => `<span class="tag" style="font-size:13px">${resp[m.k] ? '✅' : '⏳'} ${esc(m.n.split(' ')[0])}</span>`).join('');
     const foeDone = rival.miembros.filter(m => resp[m.k]).length;
+    const li = b.v === 2 ? btLvIdx(b, b.i) : -1, lv = li >= 0 ? BT_LV[li] : null, mu = mine.used || {}, curPw = (b.pw && b.pw['q' + b.i]) || {}, cbn = mine.cb || 0;
+    const lvBanner = lv ? `<div class="lvl lv${li}">${lv.e} Nivel ${li + 1}: ${lv.n}${lv.m > 1 ? ' · daño x' + lv.m : ''}${cbn >= 2 ? ' · 🔥 Racha x' + cbn : ''}</div>` : '';
+    const pwBar = lv ? `<div class="pws">${Object.entries(BT_PW).map(([k, [e, n]]) => `<button class="btn sm ${curPw[side] === k ? 'mint' : 'alt'}" data-m="btPow" data-v="${k}" ${mu[k] || curPw[side] ? 'disabled' : ''}>${e} ${n}${mu[k] ? ' (usado)' : ''}</button>`).join('')}${curPw[foe] ? `<span class="tag">Rival: ${BT_PW[curPw[foe]][0]} ${BT_PW[curPw[foe]][1]}</span>` : ''}</div>` : '';
     const pr = b.i > 0 && b.rondas && b.rondas['q' + (b.i - 1)];
-    const banner = pr ? `<div class="say" style="text-align:center;font-weight:800">Ronda ${b.i}: tu equipo hizo <span style="color:var(--ok)">−${side === 'A' ? pr.b : pr.a}</span> de daño · el rival hizo <span style="color:var(--bad)">−${side === 'A' ? pr.a : pr.b}</span></div>` : '';
+    const banner = pr ? `<div class="say" style="text-align:center;font-weight:800">Ronda ${b.i}: tu equipo hizo <span style="color:var(--ok)">−${side === 'A' ? pr.b : pr.a}</span> de daño · el rival hizo <span style="color:var(--bad)">−${side === 'A' ? pr.a : pr.b}</span>${pr.pa || pr.pb ? ' · ' + [pr.pa && 'Equipo A ' + BT_PW[pr.pa][0], pr.pb && 'Equipo B ' + BT_PW[pr.pb][0]].filter(Boolean).join(' · ') : ''}</div>` : '';
     let body = '';
     if (q.tipo === 'mcq') body = `<div class="opts">${q.opciones.map((o, idx) => `<button class="opt ${mineA ? (idx === q.correcta ? 'ok' : (mineA.v === idx ? 'bad' : '')) : ''}" data-m="btAns" data-v="${idx}" ${mineA ? 'disabled' : ''}>${esc(o)}</button>`).join('')}</div>`;
     else if (q.tipo === 'vf') body = `<div class="opts">${[['true', '✔ Verdadero'], ['false', '✘ Falso']].map(([v, t]) => `<button class="opt ${mineA ? (((v === 'true') === q.correcta) ? 'ok' : ((mineA.v === (v === 'true')) ? 'bad' : '')) : ''}" data-m="btAns" data-v="${v}" ${mineA ? 'disabled' : ''}>${t}</button>`).join('')}</div>`;
@@ -3952,11 +4087,11 @@ function renderBattle() {
     else body = `<div class="say">Tu respuesta: <b>${esc(String(mineA.v))}</b></div>`;
     const after = mineA ? `<div class="fb ${mineA.ok ? 'ok' : 'bad'}"><h3>${mineA.ok ? '¡Golpe certero! 💥' : 'Fallaste'}</h3>${mineA.ok ? '' : `<div>La respuesta correcta es <b>${esc(correctText(q))}</b>.</div>`}<div style="margin-top:6px">${esc(q.explicacion)}</div></div><div class="mute" style="font-weight:800">Esperando al resto de los equipos…</div>` : '';
     openModal(`${head}<div class="mbody">
-      <div class="vs">${hpBar(mine, 'Tu equipo', hitMine)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', hitFoe)}</div>
+      <div class="vs">${hpBar(mine, 'Tu equipo', hitMine, b.hpMax || BT_HP)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', hitFoe, b.hpMax || BT_HP)}</div>
       <div class="qhead"><span class="mute">Pregunta ${b.i + 1} de ${b.pregs.length}</span><b>⏱️ <span id="btTmr">${Math.max(0, BT_SECS - Math.floor((Date.now() - b.t0) / 1000))}</span> s</b></div>
-      ${banner}<div class="enun">${esc(q.enunciado)}</div>${body}${after}
+      ${lvBanner}${pwBar}${banner}<div class="enun">${esc(q.enunciado)}</div>${body}${after}
       <div><span class="mute">Tu equipo:</span> ${myDone} <span class="mute">· Rival: ${foeDone} de ${rival.miembros.length} respondieron</span></div>
-      <button class="btn sm alt" id="btSkip" data-m="btNext" hidden>El rival se demora: avanzar</button></div>`, { color: '#ffd6d6' });
+      <button class="btn sm alt" id="btSkip" data-m="btNext" hidden>El rival se demora: avanzar</button></div>`, { color: lv ? lv.c : '#ffd6d6' });
     if (!mineA && q.tipo === 'num') { const inp = $('#btNum'); if (inp) inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); btAnswer(inp.value); } }); }
     return;
   }
@@ -3964,7 +4099,7 @@ function renderBattle() {
   if (!bt.reward) bt.reward = btReward(b);
   const rw = bt.reward, per = mine.miembros.map(m => { let c = 0; for (let j = 0; j < b.pregs.length; j++) { const r = b.resp && b.resp['q' + j] && b.resp['q' + j][m.k]; if (r && r.ok) c++; } return { m, c }; });
   openModal(`${head}<div class="mbody"><div class="big">${win ? '🏆' : tie ? '🤝' : '💪'}</div><h2 style="text-align:center;font-size:28px">${win ? '¡Ganó tu equipo!' : tie ? '¡Empate!' : 'Esta vez ganó el rival'}</h2>
-    <div class="vs">${hpBar(mine, 'Tu equipo', false)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', false)}</div>
+    <div class="vs">${hpBar(mine, 'Tu equipo', false, b.hpMax || BT_HP)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', false, b.hpMax || BT_HP)}</div>
     <div class="kpis">${rw ? `<div class="kpi"><b>+${rw.xp}</b>XP para ti</div><div class="kpi"><b>+${rw.coins}</b>🪙</div><div class="kpi"><b>+${rw.rg} ${RES[b.area][0]}</b>${RES[b.area][1]}</div><div class="kpi"><b>+${rw.fich}</b>💬 fichas</div>` : '<div class="kpi"><b>✔</b>recompensa recibida</div>'}</div>
     <div class="list">${per.map(x => `<div class="rk" style="grid-template-columns:1fr auto"><span>${esc(x.m.n)}</span><span>${x.c} de ${b.pregs.length} aciertos</span></div>`).join('')}</div>
     <div class="say">${win ? 'Las victorias cuentan en tu perfil: ¡sigan practicando para la próxima batalla!' : 'Repasen los temas y pidan la revancha. ¡Cada batalla enseña algo!'}</div>
