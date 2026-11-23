@@ -309,15 +309,16 @@ const PAL = {
   shirt: ['#3b82f6','#ef4444','#22c55e','#f59e0b','#ec4899','#14b8a6','#8b5cf6','#f8fafc'],
   pants: ['#1f2937','#1e3a8a','#78350f','#166534','#7f1d1d','#64748b']
 };
-const STYLES = [['corto','Corto'],['largo','Largo'],['cresta','Cresta'],['chongo','Chongo'],['calvo','Sin pelo']];
+const STYLES = [['corto','Corto'],['largo','Largo'],['cresta','Cresta'],['chongo','Chongo'],['calvo','Sin pelo'],['coleta','Colita'],['coletas','Coletas'],['trenza','Trenza'],['melena','Melena']];
 const ITEMS = [
   { id:'gorra',   nombre:'Gorra',   emoji:'🧢', costo:20 },
+  { id:'lazo',    nombre:'Lazo',    emoji:'🎀', costo:20 },
   { id:'lentes',  nombre:'Lentes',  emoji:'🕶️', costo:30 },
   { id:'mochila', nombre:'Mochila', emoji:'🎒', costo:40 },
   { id:'capa',    nombre:'Capa',    emoji:'🦸', costo:90 },
   { id:'corona',  nombre:'Corona',  emoji:'👑', costo:160 }
 ];
-const defaultAvatar = () => ({ skin:PAL.skin[1], hair:PAL.hair[1], style:'corto', shirt:PAL.shirt[0], pants:PAL.pants[0], acc:[] });
+const defaultAvatar = () => ({ skin:PAL.skin[1], hair:PAL.hair[1], style:'corto', body:'chico', shirt:PAL.shirt[0], pants:PAL.pants[0], acc:[] });
 
 /* ---------- banco de retos inicial (los docentes cargan más desde su panel) ---------- */
 let _n = 0;
@@ -404,7 +405,7 @@ const Store = {
       firebase.initializeApp(CONFIG.firebase);
       this.db = firebase.firestore();
       this.mode = 'online';
-      if (CONFIG.firebase.databaseURL) { try { await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js'); this.rtdb = firebase.database(); } catch (e2) { console.warn('Realtime Database no disponible.', e2); } }
+      if (CONFIG.firebase.databaseURL) { try { await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js'); this.rtdb = firebase.database(); try { this.rtdb.ref('.info/serverTimeOffset').on('value', sn => { window.__srvOff = Number(sn.val()) || 0; }); } catch (e3) {} } catch (e2) { console.warn('Realtime Database no disponible.', e2); } }
     } catch (e) { console.warn('Firebase no disponible; se usa el modo local.', e); }
   },
   _get(k, def) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? def; } catch (e) { return def; } },
@@ -580,25 +581,33 @@ function buildAvatar(cfg) {
   const g = new THREE.Group();
   const legL = new THREE.Group(), legR = new THREE.Group();
   legL.position.set(-0.22, 0.9, 0); legR.position.set(0.22, 0.9, 0);
-  [legL, legR].forEach(l => { mbox(0.36, 0.78, 0.4, cfg.pants, 0, -0.39, 0, l); mbox(0.38, 0.16, 0.52, '#222222', 0, -0.82, 0.06, l); g.add(l); });
+  const fem = cfg.body === 'chica';
+  [legL, legR].forEach(l => { mbox(0.36, 0.78, 0.4, fem ? cfg.skin : cfg.pants, 0, -0.39, 0, l); mbox(0.38, 0.16, 0.52, '#222222', 0, -0.82, 0.06, l); g.add(l); });
   mbox(0.86, 0.95, 0.5, cfg.shirt, 0, 1.38, 0, g);
+  if (fem) mbox(1.0, 0.6, 0.64, cfg.pants, 0, 1.02, 0, g);
   const armL = new THREE.Group(), armR = new THREE.Group();
   armL.position.set(-0.62, 1.8, 0); armR.position.set(0.62, 1.8, 0);
   [armL, armR].forEach(a => { mbox(0.3, 0.7, 0.34, cfg.shirt, 0, -0.35, 0, a); mbox(0.28, 0.24, 0.3, cfg.skin, 0, -0.82, 0, a); g.add(a); });
   mbox(0.8, 0.8, 0.8, cfg.skin, 0, 2.25, 0, g);
   mbox(0.1, 0.12, 0.05, '#111111', -0.17, 2.3, 0.41, g); mbox(0.1, 0.12, 0.05, '#111111', 0.17, 2.3, 0.41, g);
-  mbox(0.26, 0.05, 0.05, '#7a2e2e', 0, 2.1, 0.41, g);
+  mbox(0.26, 0.05, 0.05, fem ? '#c2185b' : '#7a2e2e', 0, 2.1, 0.41, g);
+  if (fem) { mbox(0.16, 0.04, 0.05, '#111111', -0.17, 2.4, 0.41, g); mbox(0.16, 0.04, 0.05, '#111111', 0.17, 2.4, 0.41, g); }
   const h = cfg.hair;
   switch (cfg.style) {
     case 'corto': mbox(0.86, 0.22, 0.86, h, 0, 2.72, 0, g); mbox(0.86, 0.5, 0.14, h, 0, 2.5, -0.36, g); break;
     case 'largo': mbox(0.86, 0.22, 0.86, h, 0, 2.72, 0, g); mbox(0.86, 1.0, 0.14, h, 0, 2.2, -0.36, g); mbox(0.12, 0.7, 0.6, h, -0.42, 2.35, -0.05, g); mbox(0.12, 0.7, 0.6, h, 0.42, 2.35, -0.05, g); break;
     case 'cresta': mbox(0.16, 0.42, 0.92, h, 0, 2.8, 0, g); break;
+    case 'coleta': mbox(0.86, 0.22, 0.86, h, 0, 2.72, 0, g); mbox(0.86, 0.5, 0.14, h, 0, 2.5, -0.36, g); mbox(0.22, 0.8, 0.22, h, 0, 2.5, -0.6, g); break;
+    case 'coletas': mbox(0.86, 0.22, 0.86, h, 0, 2.72, 0, g); mbox(0.86, 0.5, 0.14, h, 0, 2.5, -0.36, g); mbox(0.22, 0.75, 0.22, h, -0.52, 2.3, -0.05, g); mbox(0.22, 0.75, 0.22, h, 0.52, 2.3, -0.05, g); break;
+    case 'trenza': mbox(0.86, 0.22, 0.86, h, 0, 2.72, 0, g); mbox(0.86, 0.5, 0.14, h, 0, 2.5, -0.36, g); mbox(0.22, 1.3, 0.22, h, 0, 1.95, -0.5, g); break;
+    case 'melena': mbox(0.86, 0.22, 0.86, h, 0, 2.72, 0, g); mbox(0.86, 0.12, 0.1, h, 0, 2.6, 0.43, g); mbox(0.86, 0.7, 0.14, h, 0, 2.35, -0.36, g); mbox(0.12, 0.55, 0.6, h, -0.42, 2.42, -0.05, g); mbox(0.12, 0.55, 0.6, h, 0.42, 2.42, -0.05, g); break;
     case 'chongo': mbox(0.86, 0.2, 0.86, h, 0, 2.72, 0, g); mbox(0.86, 0.45, 0.14, h, 0, 2.5, -0.36, g);
       { const b = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), lam(h)); b.position.set(0, 3.0, -0.12); g.add(b); } break;
   }
   const acc = cfg.acc || [];
   if (acc.includes('gorra')) { mbox(0.92, 0.2, 0.92, '#ef4444', 0, 2.8, 0, g); mbox(0.86, 0.06, 0.42, '#b91c1c', 0, 2.72, 0.6, g); }
   if (acc.includes('lentes')) { mbox(0.3, 0.2, 0.05, '#111111', -0.2, 2.31, 0.43, g); mbox(0.3, 0.2, 0.05, '#111111', 0.2, 2.31, 0.43, g); mbox(0.12, 0.04, 0.05, '#111111', 0, 2.33, 0.43, g); }
+  if (acc.includes('lazo')) { mbox(0.2, 0.2, 0.1, '#ec4899', 0.16, 2.9, 0.15, g); mbox(0.2, 0.2, 0.1, '#ec4899', 0.44, 2.9, 0.15, g); mbox(0.1, 0.1, 0.12, '#be185d', 0.3, 2.9, 0.15, g); }
   if (acc.includes('mochila')) mbox(0.62, 0.8, 0.26, '#f59e0b', 0, 1.42, -0.38, g);
   if (acc.includes('capa')) mbox(0.9, 1.2, 0.06, '#dc2626', 0, 1.25, -0.34, g);
   if (acc.includes('corona')) { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.32, 5), lam('#facc15')); c.position.set(0, 3.05, 0); g.add(c); }
@@ -677,7 +686,7 @@ function buildWorld() {
     sign.position.set(0, 4.35, D / 2 + 0.2); b.add(sign);
     scene.add(b);
     // docente (NPC)
-    const npc = buildAvatar({ skin: PAL.skin[i % PAL.skin.length], hair: PAL.hair[(i * 3) % PAL.hair.length], style: ['corto', 'largo', 'cresta', 'chongo', 'calvo'][i % 5], shirt: a.color, pants: '#1f2937', acc: i % 3 === 0 ? ['lentes'] : [] });
+    const npc = buildAvatar({ skin: PAL.skin[i % PAL.skin.length], hair: PAL.hair[(i * 3) % PAL.hair.length], body: i % 2 ? 'chica' : 'chico', style: (i % 2 ? ['largo', 'coletas', 'melena', 'trenza', 'coleta'] : ['corto', 'cresta', 'chongo', 'calvo', 'corto'])[i % 5], shirt: a.color, pants: '#1f2937', acc: i % 3 === 0 ? ['lentes'] : [] });
     npc.scale.setScalar(1.05);
     npc.position.set(dir.x * NPC_R, 0, dir.z * NPC_R); npc.rotation.y = Math.atan2(-dir.x, -dir.z); scene.add(npc);
     const mk = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(a.color), depthTest: false, transparent: true }));
@@ -1668,11 +1677,12 @@ function renderCreator() {
   panel.innerHTML = `
     <h2 style="font-size:30px">Crea tu avatar</h2>
     <div class="mute">${esc(shortName(m))} · ${m.grado}° ${m.seccion} · 🪙 ${m.coins} monedas</div>
+    <div><label>Personaje</label><div class="tabs"><button type="button" class="chip ${av.body !== 'chica' ? 'on' : ''}" data-c="set" data-k="body" data-v="chico">👦 Chico</button><button type="button" class="chip ${av.body === 'chica' ? 'on' : ''}" data-c="set" data-k="body" data-v="chica">👧 Chica</button></div></div>
     <div><label>Piel</label>${sw('skin', PAL.skin)}</div>
     <div><label>Peinado</label><div class="tabs">${STYLES.map(([id, n]) => `<button type="button" class="chip ${av.style === id ? 'on' : ''}" data-c="set" data-k="style" data-v="${id}">${n}</button>`).join('')}</div></div>
     <div><label>Color de cabello</label>${sw('hair', PAL.hair)}</div>
-    <div><label>Camiseta</label>${sw('shirt', PAL.shirt)}</div>
-    <div><label>Pantalón</label>${sw('pants', PAL.pants)}</div>
+    <div><label>${av.body === 'chica' ? 'Blusa' : 'Camiseta'}</label>${sw('shirt', PAL.shirt)}</div>
+    <div><label>${av.body === 'chica' ? 'Falda' : 'Pantalón'}</label>${sw('pants', PAL.pants)}</div>
     <div><label>Accesorios · se compran con las monedas que ganas</label><div class="shop">${shop}</div></div>
     <div class="row" style="margin-top:auto">${S.creatorFirst ? '' : '<button type="button" class="btn alt" data-c="cancel">Cancelar</button>'}<button type="button" class="btn mint" data-c="done">${S.creatorFirst ? '¡Listo, a explorar!' : 'Guardar'}</button></div>`;
   panel.scrollTop = sc;
@@ -1680,7 +1690,7 @@ function renderCreator() {
 $('#creatorPanel').addEventListener('click', e => {
   const b = e.target.closest('[data-c]'); if (!b || !S.me) return;
   const m = S.me, av = m.avatar, c = b.dataset.c, v = b.dataset.v;
-  if (c === 'set') av[b.dataset.k] = v;
+  if (c === 'set') { av[b.dataset.k] = v; if (b.dataset.k === 'body') { if (v === 'chica' && ['corto', 'cresta', 'calvo', 'chongo'].includes(av.style)) av.style = 'largo'; if (v === 'chico' && ['coleta', 'coletas', 'trenza', 'melena'].includes(av.style)) av.style = 'corto'; } }
   else if (c === 'acc') { const i = av.acc.indexOf(v); if (i >= 0) av.acc.splice(i, 1); else av.acc.push(v); }
   else if (c === 'buy') { const it = ITEMS.find(x => x.id === v); if (it && m.coins >= it.costo) { m.coins -= it.costo; m.owned.push(v); av.acc.push(v); persist(true); toast('¡Compraste ' + it.nombre + '!'); } }
   else if (c === 'cancel') { m.avatar = JSON.parse(S.backupAv); setPlayerAvatar(m.avatar); enterPlay(); return; }
@@ -3606,9 +3616,9 @@ function upsertOther(id, v) {
     const g = buildAvatar(av); g.userData.amp = 0; g.position.set(v.x, 0, v.z); g.rotation.y = v.r || 0;
     const lb = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(String(v.n || '').split(' ')[0] + ' · ' + v.g + '°' + v.s), depthTest: false, transparent: true }));
     lb.scale.set(4.2, 1.05, 1); lb.position.set(0, 3.9, 0); lb.renderOrder = 9; g.add(lb); scene.add(g);
-    o = { g, lb, tx: v.x, tz: v.z, tr: v.r || 0, m: 0, t: v.t || Date.now(), bubble: null, bubbleUntil: 0 }; Pres.others.set(id, o);
+    o = { g, lb, tx: v.x, tz: v.z, tr: v.r || 0, m: 0, t: v.t || pnow(), bubble: null, bubbleUntil: 0 }; Pres.others.set(id, o);
   }
-  o.tx = v.x; o.tz = v.z; o.tr = v.r || 0; o.m = v.m || 0; o.t = v.t || Date.now();
+  o.tx = v.x; o.tz = v.z; o.tr = v.r || 0; o.m = v.m || 0; o.t = v.t || pnow();
 }
 function dropOther(id) {
   const o = Pres.others.get(id); if (!o) return;
@@ -3618,7 +3628,7 @@ function presenceBubble(id, text) {
   const o = Pres.others.get(id); if (!o || !text) return;
   if (o.bubble) { o.g.remove(o.bubble); o.bubble.material.map.dispose(); }
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTexture(String(text)), depthTest: false, transparent: true }));
-  sp.scale.set(6, 1.5, 1); sp.position.set(0, 5.1, 0); sp.renderOrder = 10; o.g.add(sp); o.bubble = sp; o.bubbleUntil = Date.now() + 5500;
+  sp.scale.set(6, 1.5, 1); sp.position.set(0, 5.1, 0); sp.renderOrder = 10; o.g.add(sp); o.bubble = sp; o.bubbleUntil = pnow() + 5500;
 }
 function presenceLeave() {
   Pres.token++;
@@ -3626,28 +3636,32 @@ function presenceLeave() {
   if (Pres.path && Live.on) Live.remove(Pres.path).catch(() => {});
   [...Pres.others.keys()].forEach(dropOther); Pres.room = Pres.shard = Pres.path = null; Pres.lastState = '';
 }
+const PRES_MAX = 30;
+const pnow = () => Date.now() + (window.__srvOff || 0);
+function presenceWarn(e) { console.warn(e); if (!Pres.warned) { Pres.warned = true; toast('No se pudo activar «verse en vivo». Revisa Realtime Database (URL y reglas).'); } }
+setInterval(() => { if (Pres.path) Live.update(Pres.path, { t: pnow() }).catch(() => {}); }, 15000);
 async function presenceSwitch() {
   presenceLeave();
   const me = S.me; if (!me || !Live.on || (S.config.chat && S.config.chat.presencia === false) || !player) return;
   const room = S.bim + '-' + (S.world === 'area' ? S.areaId : 'plaza'), token = Pres.token; Pres.room = room;
-  let shards = {}; try { shards = (await Live.get('presence/' + room)) || {}; } catch (e) { console.warn(e); return; }
+  let shards = {}; try { shards = (await Live.get('presence/' + room)) || {}; } catch (e) { presenceWarn(e); return; }
   if (token !== Pres.token) return;
-  const now = Date.now(); let best = null;
-  Object.keys(shards).sort().forEach(k => {
-    const mem = Object.entries(shards[k] || {}).filter(([id, v]) => v && now - (v.t || 0) < 45000 && id !== me.id);
-    if (mem.length < 10) { const same = mem.filter(([, v]) => v.g === me.grado).length; if (!best || same > best.same) best = { k, same }; }
-  });
-  Pres.shard = best ? best.k : 's' + Date.now().toString(36).slice(-4);
+  const now = pnow(); let shardName = null;
+  for (let i = 0; i < 50 && !shardName; i++) {
+    const key = 's' + i, mem = Object.entries(shards[key] || {}).filter(([id, v]) => v && now - (v.t || 0) < 45000 && id !== me.id);
+    if (mem.length < PRES_MAX) shardName = key;
+  }
+  Pres.shard = shardName || 's0';
   Pres.path = 'presence/' + room + '/' + Pres.shard + '/' + me.id;
   const p = player.position;
-  try { await Live.set(Pres.path, { n: shortName(me), g: me.grado, s: me.seccion, av: me.avatar, x: r1(p.x), z: r1(p.z), r: r1(player.rotation.y), m: 0, t: now }); } catch (e) { console.warn(e); return; }
+  try { await Live.set(Pres.path, { n: shortName(me), g: me.grado, s: me.seccion, av: me.avatar, x: r1(p.x), z: r1(p.z), r: r1(player.rotation.y), m: 0, t: now }); } catch (e) { presenceWarn(e); return; }
   if (token !== Pres.token) { Live.remove(Pres.path).catch(() => {}); return; }
   Live.onDisc(Pres.path);
   Pres.unsub = Live.onChild('presence/' + room + '/' + Pres.shard, 0, { added: upsertOther, changed: upsertOther, removed: dropOther });
 }
 function presenceTick(dt, t) {
   if (!Pres.path && !Pres.others.size) return;
-  const now = Date.now();
+  const now = pnow();
   Pres.others.forEach((o, id) => {
     const dx = o.tx - o.g.position.x, dz = o.tz - o.g.position.z, d = Math.hypot(dx, dz), k = 1 - Math.exp(-dt * 6);
     o.g.position.x += dx * k; o.g.position.z += dz * k;
