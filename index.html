@@ -1764,9 +1764,9 @@ function docenteLogin() {
 }
 function openDocente(tab) {
   if (tab) T.tab = tab;
-  const tabs = [['retos', 'Retos por tema'], ['lecciones', 'Lecciones'], ['juegos', 'Juegos'], ['equipos', 'Equipos'], ['seguridad', 'Seguridad y chat'], ['progreso', 'Progreso de estudiantes'], ['datos', 'Datos y respaldo']];
+  const tabs = [['retos', 'Retos por tema'], ['lecciones', 'Lecciones'], ['juegos', 'Juegos'], ['equipos', 'Equipos'], ['seguridad', 'Seguridad y chat'], ['conectados', 'Conectados ahora'], ['progreso', 'Progreso de estudiantes'], ['datos', 'Datos y respaldo']];
   openModal(`${mhead('👩‍🏫', 'Panel docente')}<div class="mbody"><div class="tabs">${tabs.map(([id, n]) => `<button class="chip ${T.tab === id ? 'on' : ''}" data-m="ttab" data-t="${id}">${n}</button>`).join('')}</div><div id="tBody"></div></div>`, { wide: true, color: '#c7e9ff' });
-  if (T.tab === 'retos') tRetos(); else if (T.tab === 'lecciones') tLecciones(); else if (T.tab === 'juegos') tJuegos(); else if (T.tab === 'equipos') tEquipos(); else if (T.tab === 'seguridad') tSeguridad(); else if (T.tab === 'progreso') tProgreso(); else tDatos();
+  if (T.tab === 'retos') tRetos(); else if (T.tab === 'lecciones') tLecciones(); else if (T.tab === 'juegos') tJuegos(); else if (T.tab === 'equipos') tEquipos(); else if (T.tab === 'seguridad') tSeguridad(); else if (T.tab === 'conectados') tConectados(); else if (T.tab === 'progreso') tProgreso(); else tDatos();
 }
 const tipoName = { mcq: 'Opción múltiple', vf: 'Verdadero / falso', num: 'Respuesta numérica' };
 function tRetos() {
@@ -1964,6 +1964,7 @@ $('#modalCard').addEventListener('click', e => {
     case 'rk': openRanking(d.t); break;
     case 'tlogin': docenteLogin(); break;
     case 'ttab': T.tab = d.t; openDocente(); break;
+    case 'tconRef': tConectados(); break;
     case 'tnew': renderRetoForm(null); break;
     case 'tedit': renderRetoForm(S.retos.find(r => r.id === d.id)); break;
     case 'tcancel': tRetos(); break;
@@ -3695,6 +3696,26 @@ function liveStop() {
 
 /* ---------- panel docente: seguridad y chat ---------- */
 const TIPO_ALERTA = { ayuda: '🙋 Pide ayuda', insulto: 'Palabras no permitidas', contacto: 'Datos de contacto', amenaza: 'Amenaza', riesgo: '⚠️ Posible riesgo emocional' };
+async function tConectados() {
+  const box = $('#tBody'); if (!box) return;
+  const f = S.config.chat || {};
+  if (!Live.on) { box.innerHTML = '<div class="say">Esta lista necesita Firebase Realtime Database. Actívalo y agrega su <b>databaseURL</b> a la configuración del juego.</div>'; return; }
+  let tree = {};
+  try { tree = (await Live.get('presence')) || {}; } catch (e) { console.warn(e); box.innerHTML = '<p>No se pudo leer a los conectados. Revisa las reglas de Realtime Database.</p>'; return; }
+  if (T.tab !== 'conectados' || !$('#tBody')) return;
+  const now = pnow(), rooms = {};
+  Object.entries(tree).forEach(([room, shards]) => Object.values(shards || {}).forEach(sh => Object.values(sh || {}).forEach(v => {
+    if (v && v.n && now - (v.t || 0) < 45000) (rooms[room] = rooms[room] || []).push(v);
+  })));
+  const keys = Object.keys(rooms).sort(), total = keys.reduce((a, k) => a + rooms[k].length, 0);
+  const label = k => { const [b, ...r] = k.split('-'), id = r.join('-'), ar = areaById(id); return (ROMAN[+b] || b) + ' bimestre · ' + (id === 'plaza' ? '🏛️ Plaza' : ar ? ar.emoji + ' ' + ar.lugar + ' (' + ar.nombre + ')' : id); };
+  const aviso = f.presencia === false ? '<div class="say" style="margin-bottom:12px">«Verse en vivo en el mundo» está desactivado en Seguridad y chat: los estudiantes no aparecen aquí mientras siga así.</div>' : '';
+  box.innerHTML = aviso + `<div class="row" style="align-items:center;margin-bottom:12px"><div class="kpis" style="margin:0"><div class="kpi"><b>${total}</b>conectados ahora</div><div class="kpi"><b>${keys.length}</b>lugares con gente</div></div><div style="flex:0 0 auto"><button class="btn sm" data-m="tconRef">Actualizar</button></div></div>
+    <p class="mute">Se actualiza solo cada 10 segundos. Aparece quien está dentro del mundo en los últimos 45 segundos.</p>
+    <div class="list">${keys.map(k => `<div class="rcard"><div><p><b>${label(k)}</b> · ${rooms[k].length}</p><span class="mute">${rooms[k].sort((a, b) => (a.g - b.g) || String(a.s).localeCompare(b.s) || String(a.n).localeCompare(b.n)).map(v => esc(v.n) + ' (' + v.g + '° ' + esc(v.s) + ')').join(', ')}</span></div></div>`).join('') || '<p class="mute">Nadie está conectado en este momento.</p>'}</div>`;
+  clearTimeout(T.conT);
+  T.conT = setTimeout(() => { if (T.tab === 'conectados' && $('#tBody')) tConectados(); }, 10000);
+}
 async function tSeguridad() {
   const box = $('#tBody'), f = S.config.chat || {}, cc = Object.assign({}, CHAT_DEF, f);
   const toggles = `<div class="panel" style="padding:14px;display:grid;gap:8px;margin-bottom:12px"><h3 style="font-size:20px">Canales y presencia</h3><p class="mute" style="margin:0">El canal del equipo siempre está activo. Los cambios se aplican la próxima vez que cada estudiante entre al juego.</p>
