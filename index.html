@@ -213,8 +213,11 @@ th{background:var(--soft);position:sticky;top:0}
       <div><label for="inSec">Sección</label>
         <select id="inSec"><option>A</option><option>B</option><option>C</option><option>D</option><option>E</option></select></div>
     </div>
+    <div><label for="inPin">PIN (4 números)</label><input id="inPin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required autocomplete="off" placeholder="••••"></div>
+    <div id="pinConfRow" hidden><label for="inPin2">Repite tu PIN</label><input id="inPin2" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="••••"></div>
+    <div class="priv" id="pinMsg" hidden style="color:var(--ink)"></div>
     <button class="btn" type="submit" id="btnEnter">Entrar al mundo</button>
-    <div class="priv">Se guardan solo tu nombre, grado, sección y tu progreso en el juego.</div>
+    <div class="priv">Se guardan solo tu nombre, grado, sección, tu PIN (cifrado) y tu progreso en el juego.</div>
   </form>
   <button class="linkbtn" id="btnDocente" type="button">Soy docente</button>
 </section>
@@ -273,7 +276,9 @@ th{background:var(--soft);position:sticky;top:0}
    ---------------------------------------------------------------------
    CONFIGURACIÓN RÁPIDA
    · colegio        → nombre que aparece en la portada.
-   · claveDocente   → clave para entrar al panel docente (cámbiala).
+   · claveDocente   → clave del panel docente SOLO en modo local (sin Firebase).
+                      En línea, el docente entra con su correo y clave de
+                      Firebase Authentication (esta clave ya no se usa).
    · firebase       → null = el avance se guarda solo en este equipo.
                       Pega aquí tu configuración de Firebase (Firestore)
                       para tener ranking y panel docente de todo el colegio.
@@ -421,12 +426,19 @@ const Store = {
     try {
       await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
       await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js');
+      await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js');
       firebase.initializeApp(CONFIG.firebase);
+      try { await firebase.auth().signInAnonymously(); }
+      catch (ea) { console.error('Authentication anónima no disponible. Actívala en Firebase → Authentication → Sign-in method → Anonymous.', ea); throw ea; }
       this.db = firebase.firestore();
       this.mode = 'online';
       if (CONFIG.firebase.databaseURL) { try { await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js'); this.rtdb = firebase.database(); try { this.rtdb.ref('.info/serverTimeOffset').on('value', sn => { window.__srvOff = Number(sn.val()) || 0; }); } catch (e3) {} } catch (e2) { console.warn('Realtime Database no disponible.', e2); } }
     } catch (e) { console.warn('Firebase no disponible; se usa el modo local.', e); }
   },
+  /* ---------- sesiones: estudiante = anónima · docente = correo y clave ---------- */
+  isTeacher() { try { const u = firebase.auth().currentUser; return !!u && !u.isAnonymous; } catch (e) { return false; } },
+  async teacherIn(email, pass) { await firebase.auth().signInWithEmailAndPassword(email, pass); },
+  async asStudent() { const a = firebase.auth(); if (a.currentUser && !a.currentUser.isAnonymous) await a.signOut(); if (!a.currentUser) await a.signInAnonymously(); },
   _get(k, def) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? def; } catch (e) { return def; } },
   _set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn(e); } },
 
@@ -437,13 +449,14 @@ const Store = {
     if (this.mode !== 'online') return { retos: await this.getRetos(), lecciones: await this.getLecciones(), juegos: await this.getJuegos(), config: await this.getConfig() };
     const ref = this.db.collection('config').doc('main');
     const snap = await ref.get(); let cfg = snap.exists ? snap.data() : {};
-    if (!cfg.seedv || cfg.seedv < SEED_VERSION) cfg = await this._seedOnline(cfg);
+    if ((!cfg.seedv || cfg.seedv < SEED_VERSION) && this.isTeacher()) cfg = await this._seedOnline(cfg);   // solo el docente puede escribir el contenido inicial
     const ver = cfg.ver || {}, cache = this._get('ms_cache', {}), cv = cache.v || {};
     if (cache.retos && cv.retos === ver.retos && cv.lecciones === ver.lecciones && cv.juegos === ver.juegos)
       return { retos: cache.retos, lecciones: cache.lecciones, juegos: cache.juegos, config: this._cfgOf(cfg) };
     const all = await this.db.collection('contenido').get();
     let retos = [], lecciones = [], juegos = [];
     all.forEach(d => { const items = unpackItems(d.data()); if (d.id.startsWith('retos_')) retos = retos.concat(items); else if (d.id === 'lecciones') lecciones = items; else if (d.id === 'juegos') juegos = items; });
+    if (!retos.length && !cfg.seedv) return { retos: SEED.slice(), lecciones: LESS_SEED.slice(), juegos: JUEGOS_SEED.slice(), config: this._cfgOf(cfg) };   // aún no sembrado: el docente debe entrar una vez al panel
     this._set('ms_cache', { v: { retos: ver.retos, lecciones: ver.lecciones, juegos: ver.juegos }, retos, lecciones, juegos });
     return { retos, lecciones, juegos, config: this._cfgOf(cfg) };
   },
@@ -1712,22 +1725,56 @@ function updateHUD() {
 function newStudent(ape, nom, grado, sec, id) {
   return { id, apellidos: titleCase(ape), nombres: titleCase(nom), grado, seccion: sec, avatar: defaultAvatar(), owned: [], xp: 0, coins: 30, ok: {}, temas: {}, stats: {}, badges: [], res: {}, city: [], bosses: {}, lessons: {}, created: Date.now() };
 }
+/* ---------- PIN del estudiante (freno para que nadie entre con la cuenta de otro) ---------- */
+const PIN = { fails: 0, until: 0 };
+const pinFast = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'x' + (h >>> 0).toString(16); };
+async function pinHash(id, pin, forceFast) {
+  const s = 'mundosaber|' + id + '|' + pin;
+  if (!forceFast) { try { if (window.crypto && crypto.subtle) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); } } catch (e) { /* usa la versión simple */ } }
+  return pinFast(s);
+}
+const pinOk = async (id, pin, stored) => (await pinHash(id, pin, String(stored).startsWith('x'))) === stored;
+function pinReset() { $('#inPin').value = ''; $('#inPin2').value = ''; $('#pinConfRow').hidden = true; $('#pinMsg').hidden = true; }
 $('#loginCard').addEventListener('submit', async e => {
   e.preventDefault();
   const ape = $('#inApe').value, nom = $('#inNom').value;
   if (norm(ape).length < 2 || norm(nom).length < 2) { toast('Escribe tus apellidos y tus nombres completos.'); return; }
+  const pin = $('#inPin').value.trim(), pin2 = $('#inPin2').value.trim();
+  if (!/^\d{4}$/.test(pin)) { toast('Tu PIN tiene 4 números.'); return; }
+  if (Date.now() < PIN.until) { toast('Demasiados intentos. Espera ' + Math.ceil((PIN.until - Date.now()) / 1000) + ' segundos.'); return; }
   const grado = +$('#inGrado').value, sec = $('#inSec').value;
   const id = (grado + sec.toLowerCase() + '_' + norm(ape) + '_' + norm(nom)).replace(/[^a-z0-9_]+/g, '-');
   const btn = $('#btnEnter'); btn.disabled = true;
   try {
+    if (Store.mode === 'online' && S.teacher) { await Store.asStudent(); S.teacher = false; }   // un estudiante nunca usa la sesión del docente
     { const c = await Store.loadContent(); S.retos = c.retos; S.lecciones = c.lecciones; S.config = c.config; S.juegos = c.juegos; }
     let st = await Store.getStudent(id), nuevo = false;
-    if (!st) { st = newStudent(ape, nom, grado, sec, id); nuevo = true; await Store.saveStudent(st); }
+    if (st && st.pinHash) {
+      if (!(await pinOk(id, pin, st.pinHash))) {
+        PIN.fails++;
+        if (PIN.fails >= 5) { PIN.fails = 0; PIN.until = Date.now() + 60000; toast('Demasiados intentos. Espera 1 minuto o pide ayuda a tu docente.'); }
+        else toast('PIN incorrecto. Inténtalo de nuevo.');
+        return;
+      }
+      PIN.fails = 0;
+    } else {
+      // estudiante nuevo (o antiguo sin PIN): crea su PIN repitiéndolo
+      if ($('#pinConfRow').hidden) {
+        $('#pinConfRow').hidden = false; const m = $('#pinMsg'); m.hidden = false;
+        m.textContent = st ? 'Aún no tienes PIN. Repítelo para crearlo.' : 'No encontramos ese nombre. Si es tu primera vez, repite tu PIN para crearlo. Si ya jugabas, revisa tus apellidos, nombres, grado y sección.';
+        $('#inPin2').focus(); return;
+      }
+      if (pin2 !== pin) { toast('Los dos PIN no coinciden.'); return; }
+      const h = await pinHash(id, pin);
+      if (!st) { st = newStudent(ape, nom, grado, sec, id); nuevo = true; }
+      st.pinHash = h; await Store.saveStudent(st);
+    }
     st.owned = st.owned || []; st.ok = st.ok || {}; st.temas = st.temas || {}; st.stats = st.stats || {}; st.badges = st.badges || []; st.res = st.res || {}; st.city = st.city || []; st.bosses = st.bosses || {}; st.lessons = st.lessons || {};
     S.me = st; setPlayerAvatar(st.avatar); S.bim = allowedBim(st.bim); applyWorld(S.bim);
+    pinReset();
     if (nuevo) enterCreator(true); else enterPlay();
   } catch (err) { console.error(err); toast('No se pudo conectar. Revisa tu internet e inténtalo de nuevo.'); }
-  btn.disabled = false;
+  finally { btn.disabled = false; }
 });
 $('#btnDocente').addEventListener('click', openDocenteLogin);
 
@@ -1755,7 +1802,7 @@ function logout() {
   persist(true); S.me = null; S.mode = 'menu'; S.near = null;
   if (player) { scene.remove(player); player = null; }
   $('#hud').hidden = true; $('#screen-creator').hidden = true; $('#screen-login').hidden = false;
-  $('#inApe').value = ''; $('#inNom').value = '';
+  $('#inApe').value = ''; $('#inNom').value = ''; pinReset();
 }
 
 /* ---------- creador de avatar ---------- */
@@ -1849,12 +1896,22 @@ async function openRanking(tab) {
 const T = { tab: 'retos', fArea: '', fGrado: '', fBim: '', draft: null, pg: '', ps: '' };
 function openDocenteLogin() {
   if (S.teacher) { openDocente(); return; }
-  openModal(`${mhead('👩‍🏫', 'Panel docente')}<div class="mbody"><div><label for="tPass">Clave docente</label><input id="tPass" type="password" autocomplete="off"></div><button class="btn mint" data-m="tlogin">Entrar</button></div>`);
-  const i = $('#tPass'); setTimeout(() => i.focus(), 60);
+  const online = Store.mode === 'online';
+  openModal(`${mhead('👩‍🏫', 'Panel docente')}<div class="mbody">${online ? '<div><label for="tMail">Correo docente</label><input id="tMail" type="email" autocomplete="username"></div>' : ''}<div><label for="tPass">${online ? 'Clave' : 'Clave docente'}</label><input id="tPass" type="password" autocomplete="${online ? 'current-password' : 'off'}"></div><button class="btn mint" data-m="tlogin">Entrar</button></div>`);
+  const i = $('#tPass'); setTimeout(() => ($('#tMail') || i).focus(), 60);
   i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); docenteLogin(); } });
 }
-function docenteLogin() {
-  if ($('#tPass').value === CONFIG.claveDocente) { S.teacher = true; openDocente(); } else toast('Clave incorrecta.');
+async function docenteLogin() {
+  if (Store.mode === 'online') {
+    const em = ($('#tMail').value || '').trim(), pw = $('#tPass').value;
+    if (!em || !pw) { toast('Escribe tu correo y tu clave.'); return; }
+    try {
+      await Store.teacherIn(em, pw); S.teacher = true;
+      try { const c = await Store.loadContent(); S.retos = c.retos; S.lecciones = c.lecciones; S.config = c.config; S.juegos = c.juegos; } catch (e2) { console.warn(e2); }   // el docente siembra el contenido inicial si falta
+      openDocente();
+    } catch (e) { console.warn(e); toast('Correo o clave incorrectos.'); }
+  } else if ($('#tPass').value === CONFIG.claveDocente) { S.teacher = true; openDocente(); }
+  else toast('Clave incorrecta.');
 }
 function openDocente(tab) {
   if (tab) T.tab = tab;
@@ -1957,8 +2014,14 @@ async function tProgreso() {
     <h3 style="font-size:20px;margin-bottom:6px">Temas que más cuestan</h3>
     ${weak ? `<ul style="margin:0 0 14px;padding-left:20px;font-weight:700">${weak}</ul>` : '<p class="mute">Aún no hay suficientes respuestas para detectar temas difíciles.</p>'}
     <div class="tbl"><table><thead><tr><th>Estudiante</th><th>Gr./Sec.</th><th>Nivel</th><th>XP</th><th>Retos dominados</th><th>Aciertos</th><th>Insignias</th><th></th></tr></thead><tbody>
-    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${(s.badges || []).length}</td><td><button class="btn sm coral" data-m="tdelst" data-id="${esc(s.id)}" aria-label="Eliminar a ${esc(s.nombres)} ${esc(s.apellidos)}">🗑️ Eliminar</button></td></tr>`).join('') || '<tr><td colspan="8" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
+    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${(s.badges || []).length}</td><td><button class="btn sm alt" data-m="tpin" data-id="${esc(s.id)}" aria-label="Reiniciar el PIN de ${esc(s.nombres)} ${esc(s.apellidos)}">🔑 PIN</button> <button class="btn sm coral" data-m="tdelst" data-id="${esc(s.id)}" aria-label="Eliminar a ${esc(s.nombres)} ${esc(s.apellidos)}">🗑️ Eliminar</button></td></tr>`).join('') || '<tr><td colspan="8" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
     </tbody></table></div>`;
+}
+async function tResetPin(id) {
+  const st = (T.list || []).find(x => x.id === id); if (!st) return;
+  if (!confirm('¿Reiniciar el PIN de ' + st.apellidos + ', ' + st.nombres + '?\n\nEl estudiante creará un PIN nuevo la próxima vez que entre.')) return;
+  try { delete st.pinHash; await Store.saveStudent(st); Store._allc = null; toast('PIN reiniciado.'); tProgreso(); }
+  catch (e) { console.error(e); toast('No se pudo reiniciar el PIN.'); }
 }
 async function tDeleteStudent(id) {
   const st = (T.list || []).find(x => x.id === id); if (!st) return;
@@ -2072,6 +2135,7 @@ $('#modalCard').addEventListener('click', e => {
     case 'ttab': T.tab = d.t; openDocente(); break;
     case 'tconRef': tConectados(); break;
     case 'tdelst': tDeleteStudent(d.id); break;
+    case 'tpin': tResetPin(d.id); break;
     case 'tnew': renderRetoForm(null); break;
     case 'tedit': renderRetoForm(S.retos.find(r => r.id === d.id)); break;
     case 'tcancel': tRetos(); break;
