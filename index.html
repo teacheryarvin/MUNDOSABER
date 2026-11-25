@@ -151,6 +151,10 @@ th{background:var(--soft);position:sticky;top:0}
 .citem small{color:var(--mute);font-size:11px;line-height:1.1}
 .cbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .opt.sel{background:var(--sun)}
+.mrow{display:flex;gap:10px;align-items:center;justify-content:space-between;border:3px solid var(--ink);border-radius:12px;background:#fff;padding:6px 10px;margin-bottom:6px;color:var(--ink)}
+.mrow.done{opacity:.65;background:#e6f7ea}
+.mrow .mi{flex:1;min-width:0}
+.mrow .mute{font-size:12px}
 .mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .mc{min-height:78px;border:3px solid var(--ink);border-radius:12px;background:var(--soft);font-weight:800;font-size:13px;padding:6px;display:grid;place-items:center;text-align:center;box-shadow:0 3px 0 var(--ink);color:var(--ink);line-height:1.2}
 .mc.open{background:#fff}.mc.ok{background:#c9f2df}
@@ -232,6 +236,7 @@ th{background:var(--soft);position:sticky;top:0}
     <button class="btn sm" data-act="equipo">Equipo</button>
     <button class="btn sm mint" data-act="chat" id="btnChat" hidden>Chat<span id="chatBadge"></span></button>
     <button class="btn sm mint" data-act="ciudad">Mi ciudad</button>
+    <button class="btn sm" data-act="clima" title="Cambiar hora y clima">🌤️ Clima</button>
     <button class="btn sm coral" data-act="plaza" id="btnPlaza" hidden>Volver a la plaza</button>
     <button class="btn sm alt" data-act="avatar">Avatar</button>
     <button class="btn sm alt" data-act="salir">Salir</button>
@@ -545,6 +550,11 @@ const Store = {
     if (this.mode === 'online') return this.db.collection('students').doc(s.id).set(s);
     const all = this._get('ms_students', {}); all[s.id] = s; this._set('ms_students', all);
   },
+  async deleteStudent(id) {
+    if (this.mode === 'online') await this.db.collection('students').doc(id).delete();
+    else { const all = this._get('ms_students', {}); delete all[id]; this._set('ms_students', all); }
+    this._allc = null; this._rk = {};
+  },
   async allStudents() {
     if (this.mode === 'online') {
       if (this._allc && Date.now() - this._allc.t < 120000) return this._allc.list;
@@ -580,8 +590,77 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color('#9fd8ff');
 scene.fog = new THREE.Fog('#9fd8ff', 70, 170);
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 400);
-scene.add(new THREE.HemisphereLight('#ffffff', '#8fbf7a', 0.95));
+const hemi = new THREE.HemisphereLight('#ffffff', '#8fbf7a', 0.95); scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff4d6', 0.7); sun.position.set(30, 50, 20); scene.add(sun);
+
+/* ---------- Día y noche, clima ---------- */
+const moonL = new THREE.DirectionalLight('#9db4ff', 0); scene.add(moonL);
+const ENV = { base: new THREE.Color('#9fd8ff'), time: 0.36, weather: 'despejado', wf: 0, next: 80, manual: false, preset: -1, flash: 0, flashT: 8, rainAmt: 0, a: new THREE.Color(), b: new THREE.Color(), dir: new THREE.Vector3() };
+const ENV_PRESETS = [['☀️', 'Día despejado', 0.42, 'despejado'], ['⛅', 'Día nublado', 0.42, 'nublado'], ['🌧️', 'Lluvia y tormenta', 0.45, 'lluvia'], ['🌇', 'Atardecer', 0.74, 'despejado'], ['🌙', 'Noche estrellada', 0.02, 'despejado'], ['🌃', 'Noche de lluvia', 0.02, 'lluvia']];
+const skyDisc = (c, r) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), new THREE.MeshBasicMaterial({ color: c, fog: false })); m.frustumCulled = false; m.visible = false; scene.add(m); return m; };
+ENV.sunM = skyDisc('#fff1a8', 8); ENV.moonM = skyDisc('#e8eefc', 5.5);
+(() => {
+  const n = 450, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 0.93 + 0.07), r = 190; pos[i * 3] = r * Math.sin(ph) * Math.cos(th); pos[i * 3 + 1] = r * Math.cos(ph); pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  ENV.stars = new THREE.Points(g, new THREE.PointsMaterial({ color: '#ffffff', size: 2, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false, fog: false }));
+  ENV.stars.frustumCulled = false; ENV.stars.visible = false; scene.add(ENV.stars);
+  const RN = 650; ENV.rx = new Float32Array(RN); ENV.ry = new Float32Array(RN); ENV.rz = new Float32Array(RN); ENV.rp = new Float32Array(RN * 6);
+  for (let i = 0; i < RN; i++) { ENV.rx[i] = (Math.random() - 0.5) * 60; ENV.ry[i] = Math.random() * 30; ENV.rz[i] = (Math.random() - 0.5) * 60; }
+  const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.BufferAttribute(ENV.rp, 3));
+  ENV.rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: '#cfe3ff', transparent: true, opacity: 0, fog: false }));
+  ENV.rain.frustumCulled = false; ENV.rain.visible = false; scene.add(ENV.rain);
+})();
+function applyEnv() {
+  const E = ENV, h = (1 - Math.cos(E.time * Math.PI * 2)) / 2, light = Math.max(0, Math.min(1, (h - 0.25) / 0.5)), tw = Math.max(0, 1 - Math.abs(2 * light - 1)), w = E.wf;
+  E.light = light; E.tw = tw;
+  E.a.set('#0a1030').lerp(E.base, light);
+  E.a.lerp(E.b.set('#ff9a62'), tw * 0.4);
+  E.a.lerp(E.b.set('#8b97a6').multiplyScalar(0.3 + 0.7 * light), w * 0.7);
+  if (E.flash > 0) E.a.lerp(E.b.set('#ffffff'), E.flash * 0.35);
+  scene.background.copy(E.a); scene.fog.color.copy(E.a); scene.fog.near = 70 - w * 35; scene.fog.far = 170 - w * 70;
+  hemi.intensity = (0.32 + 0.63 * light) * (1 - w * 0.25) + E.flash * 0.7;
+  hemi.color.set('#7f8fe0').lerp(E.b.set('#ffffff'), light); hemi.groundColor.set('#2a3a2f').lerp(E.b.set('#8fbf7a'), light);
+  sun.intensity = 0.7 * light * (1 - w * 0.6); sun.color.set('#fff4d6').lerp(E.b.set('#ffb070'), tw * 0.8);
+  moonL.intensity = 0.35 * (1 - light) * (1 - w * 0.5);
+  const a = E.time * Math.PI * 2, x = 60 * Math.sin(a), y = -60 * Math.cos(a);
+  sun.position.set(x, Math.max(y, 5), 20); moonL.position.set(-x, Math.max(-y, 5), -20);
+  E.sx = x; E.sy = y;
+}
+function envTick(dt) {
+  const E = ENV;
+  if (!E.manual) {
+    E.time = (E.time + dt / 360) % 1; E.next -= dt;
+    if (E.next <= 0) { const r = Math.random(); E.weather = r < 0.55 ? 'despejado' : r < 0.8 ? 'nublado' : 'lluvia'; E.next = 60 + Math.random() * 90; }
+  }
+  const wt = E.weather === 'despejado' ? 0 : E.weather === 'nublado' ? 0.5 : 1;
+  E.wf += (wt - E.wf) * Math.min(1, dt * 0.5);
+  E.rainAmt = Math.max(0, (E.wf - 0.55) / 0.45);
+  if (E.rainAmt > 0.8) { E.flashT -= dt; if (E.flashT <= 0) { E.flash = 1; E.flashT = 7 + Math.random() * 10; } }
+  E.flash = Math.max(0, E.flash - dt * 3);
+  applyEnv();
+  const cp = camera.position, light = E.light;
+  E.dir.set(E.sx, E.sy, 20).normalize().multiplyScalar(150);
+  E.sunM.position.copy(cp).add(E.dir); E.sunM.visible = E.sy > -4 && E.wf < 0.85; E.sunM.material.color.set('#fff1a8').lerp(E.b.set('#ff9a52'), E.tw);
+  E.dir.set(-E.sx, -E.sy, -20).normalize().multiplyScalar(150);
+  E.moonM.position.copy(cp).add(E.dir); E.moonM.visible = -E.sy > -4 && E.wf < 0.85;
+  const so = (1 - light) * (1 - E.wf); E.stars.material.opacity = so; E.stars.visible = so > 0.02; E.stars.position.copy(cp);
+  const R = E.rain; R.visible = E.rainAmt > 0.03;
+  if (R.visible) {
+    R.material.opacity = 0.55 * E.rainAmt; const p = E.rp, n = E.rx.length;
+    for (let i = 0; i < n; i++) {
+      let y = E.ry[i] - 34 * dt; if (y < 0) y += 30; E.ry[i] = y;
+      const x = cp.x + E.rx[i], z = cp.z + E.rz[i], k = i * 6;
+      p[k] = x; p[k + 1] = y; p[k + 2] = z; p[k + 3] = x + 0.12; p[k + 4] = y + 1.1; p[k + 5] = z + 0.04;
+    }
+    R.geometry.attributes.position.needsUpdate = true;
+  }
+}
+function envCycle() {
+  const E = ENV; E.preset++;
+  if (E.preset >= ENV_PRESETS.length) { E.preset = -1; E.manual = false; toast('🔄 Clima automático: el día y el clima cambian solos.'); return; }
+  const [ic, name, t, wx] = ENV_PRESETS[E.preset]; E.manual = true; E.time = t; E.weather = wx; toast(ic + ' ' + name);
+}
 
 const MAT = {};
 const lam = c => (MAT[c] = MAT[c] || new THREE.MeshLambertMaterial({ color: c }));
@@ -1572,6 +1651,7 @@ function tick() {
   presenceTick(dt, t);
   if (S.world === 'area' && S.mode === 'play' && !S.lock && player) areaOrbs.forEach(o => { if (!o.got) { o.m.rotation.y += dt * 2; o.m.position.y = 1.2 + Math.sin(t * 3 + o.z) * 0.2; if (Math.hypot(player.position.x - o.x, player.position.z - o.z) < 1.9) collectOrb(o); } });
   updateCamera(t, dt);
+  envTick(dt);
   renderer.render(scene, camera);
 }
 
@@ -1876,9 +1956,17 @@ async function tProgreso() {
     <div class="kpis" style="margin-bottom:12px"><div class="kpi"><b>${list.length}</b>estudiantes</div><div class="kpi"><b>${list.length ? Math.round(list.reduce((a, s) => a + precOf(s), 0) / list.length) : 0}%</b>aciertos promedio</div><div class="kpi"><b>${list.reduce((a, s) => a + Object.keys(s.ok || {}).length, 0)}</b>retos dominados</div></div>
     <h3 style="font-size:20px;margin-bottom:6px">Temas que más cuestan</h3>
     ${weak ? `<ul style="margin:0 0 14px;padding-left:20px;font-weight:700">${weak}</ul>` : '<p class="mute">Aún no hay suficientes respuestas para detectar temas difíciles.</p>'}
-    <div class="tbl"><table><thead><tr><th>Estudiante</th><th>Gr./Sec.</th><th>Nivel</th><th>XP</th><th>Retos dominados</th><th>Aciertos</th><th>Insignias</th></tr></thead><tbody>
-    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${(s.badges || []).length}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
+    <div class="tbl"><table><thead><tr><th>Estudiante</th><th>Gr./Sec.</th><th>Nivel</th><th>XP</th><th>Retos dominados</th><th>Aciertos</th><th>Insignias</th><th></th></tr></thead><tbody>
+    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${(s.badges || []).length}</td><td><button class="btn sm coral" data-m="tdelst" data-id="${esc(s.id)}" aria-label="Eliminar a ${esc(s.nombres)} ${esc(s.apellidos)}">🗑️ Eliminar</button></td></tr>`).join('') || '<tr><td colspan="8" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
     </tbody></table></div>`;
+}
+async function tDeleteStudent(id) {
+  const st = (T.list || []).find(x => x.id === id); if (!st) return;
+  if (!confirm('¿Eliminar a ' + st.apellidos + ', ' + st.nombres + ' (' + st.grado + '° ' + st.seccion + ')?\n\nSe borrarán su avance (XP, retos y avatar) y saldrá de su equipo. Esta acción no se puede deshacer.')) return;
+  try {
+    if (st.team) { try { await Store._teamMut(st.team, t => { t.miembros = t.miembros.filter(m => m.id !== st.id); if (!t.miembros.length) return { delete: true }; if (t.creador === st.id) t.creador = t.miembros[0].id; }); } catch (e) { console.warn(e); } }
+    await Store.deleteStudent(st.id); toast('Estudiante eliminado.'); tProgreso();
+  } catch (e) { console.error(e); toast('No se pudo eliminar. Revisa tu conexión.'); }
 }
 function download(name, text, type) {
   const b = new Blob([text], { type: type || 'application/json' }), a = document.createElement('a');
@@ -1949,6 +2037,8 @@ $('#modalCard').addEventListener('click', e => {
     case 'tmDel': if (confirm('¿Disolver este equipo?')) Store.teamDelete(d.c).then(() => { toast('Equipo disuelto.'); tEquipos(); }).catch(() => toast('No se pudo disolver.')); break;
     case 'mgL': S.mg.sel = +d.i; renderPares(); break;
     case 'crOpt': crAnswer(d.v); break;
+    case 'qsA': questAnswer(+d.v); break;
+    case 'qsNext': questNext(); break;
     case 'mgR': mgRight(+d.i); break;
     case 'mgC': mgCard(+d.i); break;
     case 'mgK': mgKey(d.k); break;
@@ -1981,6 +2071,7 @@ $('#modalCard').addEventListener('click', e => {
     case 'tlogin': docenteLogin(); break;
     case 'ttab': T.tab = d.t; openDocente(); break;
     case 'tconRef': tConectados(); break;
+    case 'tdelst': tDeleteStudent(d.id); break;
     case 'tnew': renderRetoForm(null); break;
     case 'tedit': renderRetoForm(S.retos.find(r => r.id === d.id)); break;
     case 'tcancel': tRetos(); break;
@@ -2019,6 +2110,7 @@ $('#hudTools').addEventListener('click', e => {
   else if (b.dataset.act === 'equipo') openTeam();
   else if (b.dataset.act === 'chat') toggleChat();
   else if (b.dataset.act === 'ciudad') enterCity();
+  else if (b.dataset.act === 'clima') envCycle();
   else if (b.dataset.act === 'avatar') enterCreator(false);
   else if (b.dataset.act === 'salir') logout();
 });
@@ -2150,6 +2242,50 @@ function exitCity() {
   updateHUD();
   presenceSwitch();
 }
+/* ---------- Misiones de construcción ---------- */
+const cnt = (c, t) => c.filter(r => r.t === t).length;
+const rectOf = r => { const [w, d] = foot(BUILD_BY[r.t], r.r); return { x1: r.x, z1: r.z, x2: r.x + w, z2: r.z + d, cx: r.x + w / 2, cz: r.z + d / 2 }; };
+const touching = (a, b) => { const A = rectOf(a), B = rectOf(b), zo = Math.min(A.z2, B.z2) - Math.max(A.z1, B.z1), xo = Math.min(A.x2, B.x2) - Math.max(A.x1, B.x1); return (zo > 0 && (A.x2 === B.x1 || B.x2 === A.x1)) || (xo > 0 && (A.z2 === B.z1 || B.z2 === A.z1)); };
+const nearBy = (a, b, d) => { const A = rectOf(a), B = rectOf(b); return Math.hypot(A.cx - B.cx, A.cz - B.cz) <= d; };
+const MISIONES = [
+  { id: 'm_mat1', area: 'mat', ico: '🏠', t: 'Barrio de casas', txt: 'Construye 3 casas. Cada casa ocupa 2 × 2 casillas.', need: { casa: 3 }, q: { t: '¿Cuántas casillas ocupan en total las 3 casas?', o: ['12', '6', '9', '16'], c: 0, e: 'Cada casa: 2 × 2 = 4 casillas. Tres casas: 3 × 4 = 12.' }, xp: 30, coins: 20 },
+  { id: 'm_mat2', area: 'mat', ico: '📚', t: 'Biblioteca rectangular', txt: 'Construye una biblioteca. Mide 3 × 2 casillas.', need: { biblioteca: 1 }, q: { t: '¿Cuál es el perímetro de la biblioteca (suma de todos sus lados)?', o: ['10', '6', '12', '5'], c: 0, e: 'Perímetro = 2 × (3 + 2) = 10 casillas.' }, xp: 30, coins: 20 },
+  { id: 'm_mat3', area: 'mat', ico: '🏮', t: 'Avenida de faroles', txt: 'Coloca 4 faroles en la misma fila, cada uno 3 casillas después del anterior.', need: { farol: 4 }, extra: c => { const f = c.filter(r => r.t === 'farol'); return f.some(a => [3, 6, 9].every(k => f.some(b => b.z === a.z && b.x === a.x + k))); }, extraTxt: 'Alinéalos en la misma fila: separados 3 casillas.', q: { t: 'Si el primer farol está en la casilla 2, ¿en qué casilla está el cuarto?', o: ['11', '9', '8', '14'], c: 0, e: '2 + 3 + 3 + 3 = 11. Es una secuencia que sube de 3 en 3.' }, xp: 40, coins: 25 },
+  { id: 'm_com', area: 'com', ico: '🏫', t: 'Ciudad de las letras', txt: 'Construye una biblioteca y una escuela, una pegada a la otra.', need: { biblioteca: 1, escuela: 1 }, extra: c => c.some(a => a.t === 'biblioteca' && c.some(b => b.t === 'escuela' && touching(a, b))), extraTxt: 'Pega los dos edificios por un lado.', q: { t: '«Biblioteca» es una palabra…', o: ['grave (llana)', 'aguda', 'esdrújula', 'sobresdrújula'], c: 0, e: 'bi-blio-TE-ca: la fuerza cae en la penúltima sílaba, y no lleva tilde porque termina en vocal.' }, xp: 35, coins: 20 },
+  { id: 'm_soc', area: 'soc', ico: '🏛️', t: 'Centro histórico', txt: 'Construye una plaza con bandera, un museo y una capilla, cerca de la plaza (máximo 6 casillas).', need: { plaza: 1, museo: 1, capilla: 1 }, extra: c => c.some(p => p.t === 'plaza' && c.some(m => m.t === 'museo' && nearBy(p, m, 6)) && c.some(k => k.t === 'capilla' && nearBy(p, k, 6))), extraTxt: 'Acerca el museo y la capilla a la plaza.', q: { t: '¿Cómo se llama la plaza principal de muchas ciudades del Perú?', o: ['Plaza de Armas', 'Plaza de Toros', 'Plaza Sésamo', 'Plaza de Aduanas'], c: 0, e: 'La Plaza de Armas es el centro histórico: suele reunir la iglesia, el municipio y otros edificios.' }, xp: 35, coins: 20 },
+  { id: 'm_cyt', area: 'cyt', ico: '🔭', t: 'Ciencia en la ciudad', txt: 'Construye un observatorio, un laboratorio y 2 árboles.', need: { observatorio: 1, laboratorio: 1, arbol: 2 }, q: { t: '¿Qué instrumento usa un astrónomo para observar las estrellas?', o: ['Telescopio', 'Microscopio', 'Termómetro', 'Balanza'], c: 0, e: 'El telescopio acerca los objetos lejanos del cielo.' }, xp: 35, coins: 20 },
+  { id: 'm_ing', area: 'ing', ico: '⛵', t: 'Harbour', txt: 'Construye un puerto y 2 bancas para esperar los barcos.', need: { puerto: 1, banca: 2 }, q: { t: 'How do you say «puerto» in English?', o: ['Port', 'Park', 'Post', 'Pot'], c: 0, e: 'Puerto = port (o harbour).' }, xp: 35, coins: 20 },
+  { id: 'm_dpcc', area: 'dpcc', ico: '🌳', t: 'Ciudad verde', txt: 'Planta 5 árboles y 1 jardín de flores.', need: { arbol: 5, flores: 1 }, q: { t: '¿Cuál es una buena práctica para cuidar el ambiente?', o: ['Reciclar los residuos', 'Botar basura a la calle', 'Dejar la luz prendida', 'Desperdiciar agua'], c: 0, e: 'Reciclar reduce la basura y cuida los recursos.' }, xp: 35, coins: 20 },
+  { id: 'm_art', area: 'art', ico: '🎨', t: 'Calle de arte', txt: 'Construye una galería de arte y un mural.', need: { galeria: 1, mural: 1 }, q: { t: '¿Qué es un mural?', o: ['Una pintura grande sobre una pared', 'Una escultura pequeña', 'Un instrumento musical', 'Un tipo de baile'], c: 0, e: 'Un mural es una obra pintada directamente sobre un muro.' }, xp: 35, coins: 20 },
+  { id: 'm_edf', area: 'edf', ico: '🏐', t: 'Deporte en el barrio', txt: 'Construye una cancha y 2 bancas para el público.', need: { cancha: 1, banca: 2 }, q: { t: '¿Cuántos jugadores de cada equipo hay en la cancha en un partido de vóley?', o: ['6', '5', '11', '7'], c: 0, e: 'En vóley juegan 6 jugadores por equipo.' }, xp: 35, coins: 20 },
+  { id: 'm_ept', area: 'ept', ico: '🛠️', t: 'Emprendimiento', txt: 'Construye un taller de oficios y una casa.', need: { taller: 1, casa: 1 }, q: { t: '¿Qué es un emprendimiento?', o: ['Un negocio que una persona crea', 'Un tipo de impuesto', 'Una obra de arte', 'Un deporte'], c: 0, e: 'Emprender es crear un proyecto o negocio propio.' }, xp: 35, coins: 20 },
+  { id: 'm_rel', area: 'rel', ico: '🕊️', t: 'Valores en comunidad', txt: 'Construye una capilla y un jardín de flores.', need: { capilla: 1, flores: 1 }, q: { t: '¿Qué valor significa reconocer y agradecer lo recibido?', o: ['Gratitud', 'Envidia', 'Orgullo', 'Pereza'], c: 0, e: 'La gratitud fortalece los vínculos con los demás.' }, xp: 35, coins: 20 }
+];
+const MIS_BY = Object.fromEntries(MISIONES.map(m => [m.id, m]));
+function misState(m) {
+  const c = S.me.city, parts = Object.entries(m.need).map(([id, n]) => ({ id, n, have: Math.min(cnt(c, id), n) })), okNeed = parts.every(p => p.have >= p.n);
+  return { parts, okNeed, ready: okNeed && (!m.extra || m.extra(c)), done: (S.me.mis || []).includes(m.id) };
+}
+const misCount = () => '(' + MISIONES.filter(m => (S.me.mis || []).includes(m.id)).length + '/' + MISIONES.length + ')';
+function misPanel() {
+  if (cs.misQ && MIS_BY[cs.misQ]) {
+    const m = MIS_BY[cs.misQ];
+    return `<div class="cbar"><div><b>${m.ico} ${esc(m.t)}</b><div class="mute">${esc(m.q.t)}</div></div><button class="btn sm alt" data-k="misX">Volver</button></div><div class="citems">${(cs.misOrder || []).map(i => `<button class="citem" data-k="misA" data-v="${i}" style="width:150px"><b>${esc(m.q.o[i])}</b></button>`).join('')}</div>`;
+  }
+  return MISIONES.map(m => {
+    const st = misState(m), prog = st.parts.map(p => BUILD_BY[p.id].emoji + ' ' + p.have + '/' + p.n).join(' · ');
+    const warn = st.okNeed && !st.ready && !st.done && m.extraTxt ? ' · ⚠️ ' + esc(m.extraTxt) : '';
+    const btn = st.done ? '<span class="tag">✅ Cumplida</span>' : `<button class="btn sm ${st.ready ? 'mint' : 'alt'}" data-k="mis" data-v="${m.id}" ${st.ready ? '' : 'disabled'}>${st.ready ? 'Completar' : 'Construye'}</button>`;
+    return `<div class="mrow ${st.done ? 'done' : ''}"><div class="mi"><b>${m.ico} ${esc(m.t)}</b> <span class="mute">· ${RES[m.area][1]}</span><div class="mute">${esc(m.txt)}</div><div class="mute">${prog}${warn}</div></div>${btn}</div>`;
+  }).join('');
+}
+function completeMision(m) {
+  const me = S.me; me.mis = me.mis || []; if (me.mis.includes(m.id)) return;
+  me.mis.push(m.id); me.xp += m.xp; me.coins += m.coins; me.res[m.area] = (me.res[m.area] || 0) + 4;
+  persist(true); updateHUD(); cs.misQ = null;
+  toast('🎯 ¡Misión cumplida! ' + m.q.e + ' · +' + m.xp + ' XP · +' + m.coins + ' 🪙 · +4 ' + RES[m.area][0]);
+  renderCityPanel();
+}
 function updateCityTitle() { const n = S.me.city.length; $('#cityTitle').textContent = 'Mi ciudad · ' + n + (n === 1 ? ' construcción' : ' construcciones'); }
 
 function renderCityPanel() {
@@ -2164,12 +2300,12 @@ function renderCityPanel() {
     mid = `<div class="cbar"><div><b>${it.emoji} ${esc(it.nombre)}</b><div class="mute">Si la quitas, recuperas la mitad: ${back} ${ic}</div></div><div class="row" style="flex:0 0 auto"><button class="btn sm" data-k="move">Mover</button><button class="btn sm coral" data-k="del">Quitar</button><button class="btn sm alt" data-k="close">Cerrar</button></div></div>`;
   } else {
     const list = BUILD.filter(b => b.tipo === cs.tab);
-    mid = `<div class="tabs"><button class="chip ${cs.tab === 'edif' ? 'on' : ''}" data-k="tab" data-v="edif">Construcciones</button><button class="chip ${cs.tab === 'deco' ? 'on' : ''}" data-k="tab" data-v="deco">Decoración</button></div>
-      <div class="citems">${list.map(it => {
+    mid = `<div class="tabs"><button class="chip ${cs.tab === 'edif' ? 'on' : ''}" data-k="tab" data-v="edif">Construcciones</button><button class="chip ${cs.tab === 'deco' ? 'on' : ''}" data-k="tab" data-v="deco">Decoración</button><button class="chip ${cs.tab === 'mis' ? 'on' : ''}" data-k="tab" data-v="mis">🎯 Misiones ${misCount()}</button></div>
+      ${cs.tab === 'mis' ? misPanel() : `<div class="citems">${list.map(it => {
         const cost = it.tipo === 'edif' ? `${RES[it.area][0]} ${it.costo}` : `🪙 ${it.costo}`;
         const src = it.tipo === 'edif' ? areaById(it.area).nombre : 'Con monedas';
         return `<button class="citem" data-k="build" data-v="${it.id}" ${canAfford(it) ? '' : 'style="opacity:.5"'}><span class="em">${it.emoji}</span><b>${esc(it.nombre)}</b><span class="cost">${cost}</span><small>${esc(src)}</small></button>`;
-      }).join('')}</div>`;
+      }).join('')}</div>`}`;
   }
   p.innerHTML = `<div class="rchips">${chips}</div>${mid}`;
 }
@@ -2179,7 +2315,10 @@ $('#screen-city').addEventListener('click', e => {
   if (k === 'back') exitCity();
   else if (k === 'zin') cs.dist = clamp(cs.dist - 5, 16, 50);
   else if (k === 'zout') cs.dist = clamp(cs.dist + 5, 16, 50);
-  else if (k === 'tab') { cs.tab = v; renderCityPanel(); }
+  else if (k === 'tab') { cs.tab = v; cs.misQ = null; renderCityPanel(); }
+  else if (k === 'mis') { const m = MIS_BY[v]; if (!m || !misState(m).ready) return; cs.misQ = v; cs.misOrder = shuffle(m.q.o.map((_, i) => i)); renderCityPanel(); }
+  else if (k === 'misX') { cs.misQ = null; renderCityPanel(); }
+  else if (k === 'misA') { const m = MIS_BY[cs.misQ]; if (!m) return; const ok = +v === m.q.c; beep(ok); if (ok) completeMision(m); else toast('No es esa respuesta. ¡Piénsalo otra vez!'); }
   else if (k === 'build') {
     const it = BUILD_BY[v];
     if (!canAfford(it)) {
@@ -2347,7 +2486,7 @@ function areaCollide(p) {
   const dx = p.x - AREA_CX, d = Math.hypot(dx, p.z);
   if (d > AREA_R) { p.x = AREA_CX + dx / d * AREA_R; p.z = p.z / d * AREA_R; }
 }
-function setSky(hex) { const c = new THREE.Color(hex); scene.background.copy(c); scene.fog.color.copy(c); }
+function setSky(hex) { ENV.base.set(hex); applyEnv(); }
 
 /* ---------- construcción del mundo de un área ---------- */
 function stationTexture(emoji, label, dim) {
@@ -2388,6 +2527,105 @@ function disposeArea() {
   if (areaRoot) { areaRoot.traverse(o => { if (o.material && o.material.map) o.material.map.dispose(); }); scene.remove(areaRoot); areaRoot = null; }
   areaItems = []; areaCols = []; areaAnim = []; areaSpaces = []; areaOrbs = [];
 }
+/* ---------- Misiones con historia (personajes) ---------- */
+const NP = (name, skin, hair, style, shirt, pants, acc = [], body = 'chico') => ({ name, skin, hair, style, shirt, pants, acc, body });
+const QUESTS = {
+  mat: { id: 'q_mat', npc: NP('Ing. Rosa', '#e0ac69', '#2b2b2b', 'coleta', '#3b82f6', '#1f2937', ['lentes'], 'chica'), title: 'El puente roto',
+    steps: [
+      { say: 'El puente de la plaza se rompió. Hay un tramo de 12 metros y cada tabla mide 2 metros. ¿Cuántas tablas necesito?', o: ['6', '10', '14', '24'], c: 0, e: '12 ÷ 2 = 6 tablas.' },
+      { say: '¡Bien! Cada tabla cuesta S/ 15. Con las tablas que calculaste, ¿cuánto debo pagar?', o: ['S/ 60', 'S/ 90', 'S/ 120', 'S/ 75'], c: 1, e: '6 tablas × S/ 15 = S/ 90.' },
+      { say: 'Ahora hay que pintar la baranda de 12 metros. Cada litro de pintura rinde 3 metros. ¿Cuántos litros compro?', o: ['4', '3', '6', '36'], c: 0, e: '12 ÷ 3 = 4 litros.' }
+    ], end: '¡El puente quedó listo! Gracias a tus cálculos, todos podrán cruzar sin problemas.', xp: 60, coins: 30 },
+  com: { id: 'q_com', npc: NP('Profe Lucía', '#f1c27d', '#5b3a1a', 'melena', '#ec4899', '#1f2937', [], 'chica'), title: 'El duende sin tildes',
+    steps: [
+      { say: 'Un duende travieso borró las tildes de mis cuentos. Ayúdame: ¿cuál de estas palabras necesita tilde?', o: ['lapiz', 'mesa', 'libro', 'casa'], c: 0, e: 'LÁ-piz es grave y termina en z, por eso lleva tilde: lápiz.' },
+      { say: 'Muy bien. Ahora, la palabra «murciélago». ¿Cómo se clasifica por su acento?', o: ['Aguda', 'Grave (llana)', 'Esdrújula', 'Sobresdrújula'], c: 2, e: 'mur-CIÉ-la-go: el acento cae en la antepenúltima sílaba. Las esdrújulas siempre llevan tilde.' },
+      { say: 'Última prueba del duende: ¿cuál está bien escrita?', o: ['digamelo', 'dígamelo', 'digámelo', 'digamélo'], c: 1, e: 'DÍ-ga-me-lo es sobresdrújula y siempre se tilda en la sílaba tónica.' }
+    ], end: '¡El duende se rindió! Los cuentos ya tienen todas sus tildes. Eres un gran corrector.', xp: 60, coins: 30 },
+  ing: { id: 'q_ing', npc: NP('Captain Sam', '#c68642', '#2b2b2b', 'corto', '#14b8a6', '#1f2937', ['gorra']), title: 'Tourists at the port',
+    steps: [
+      { say: 'A tourist asks me: "Where is the museum?" What do I answer?', o: ['Turn left at the corner.', 'I am fine, thank you.', 'It is my birthday.', 'Yes, I like pizza.'], c: 0, e: 'To give directions we say "Turn left at the corner".' },
+      { say: 'Another tourist says: "I am hungry." How do you say «Tengo hambre»?', o: ['I am angry.', 'I am hungry.', 'I am happy.', 'I have hunger.'], c: 1, e: '«Tengo hambre» = "I am hungry".' },
+      { say: 'Complete the sentence: "Yesterday, we ___ to the port."', o: ['go', 'goes', 'went', 'going'], c: 2, e: 'The past simple of "go" is "went".' }
+    ], end: 'Great job! The tourists found the museum and loved the port. Thank you!', xp: 60, coins: 30 },
+  art: { id: 'q_art', npc: NP('Maestra Inés', '#f1c27d', '#8d5524', 'trenza', '#f59e0b', '#7c3aed', [], 'chica'), title: 'El mural del colegio',
+    steps: [
+      { say: 'Vamos a pintar un mural gigante. Para empezar, ¿cuáles son los colores primarios?', o: ['Rojo, amarillo y azul', 'Verde, naranja y violeta', 'Blanco, negro y gris', 'Rosado, celeste y marrón'], c: 0, e: 'Los colores primarios son rojo, amarillo y azul: con ellos se forman los demás.' },
+      { say: 'Para pintar el pasto necesito verde. Si mezclo amarillo y azul, ¿qué color obtengo?', o: ['Naranja', 'Violeta', 'Verde', 'Marrón'], c: 2, e: 'Amarillo + azul = verde.' },
+      { say: 'Para el sol quiero un color cálido. ¿Cuál elijo?', o: ['Azul', 'Verde', 'Violeta', 'Anaranjado'], c: 3, e: 'Los colores cálidos (rojo, naranja, amarillo) dan sensación de calor.' }
+    ], end: '¡El mural quedó precioso! Todo el colegio podrá verlo gracias a tu ayuda.', xp: 60, coins: 30 },
+  dpcc: { id: 'q_dpcc', npc: NP('Mateo, alcalde escolar', '#e0ac69', '#2b2b2b', 'corto', '#ef4444', '#1f2937', []), title: 'Elecciones del colegio',
+    steps: [
+      { say: 'Estamos organizando las elecciones del municipio escolar. Primero, ¿cuál es un derecho de los niños y adolescentes?', o: ['Recibir educación', 'Hacer trabajos peligrosos', 'Quedarse sin nombre', 'No ser escuchados'], c: 0, e: 'Todos tenemos derecho a la educación.' },
+      { say: 'Para elegir con responsabilidad, el voto debe ser…', o: ['obligado por un amigo', 'libre, secreto y consciente', 'público para todos', 'a cambio de un regalo'], c: 1, e: 'El voto es libre, secreto y consciente: nadie debe presionarte.' },
+      { say: 'Dos compañeros discuten por los resultados. ¿Qué acción muestra convivencia democrática?', o: ['Gritar más fuerte', 'Ignorarlos', 'Dialogar y escuchar a ambos', 'Burlarse de ellos'], c: 2, e: 'Dialogar y escuchar ayuda a resolver los conflictos con respeto.' }
+    ], end: '¡Las elecciones salieron muy bien! Gracias por ayudarnos a practicar la democracia.', xp: 60, coins: 30 },
+  soc: { id: 'q_soc', npc: NP('Don Carlos, guía', '#8d5524', '#cfcfcf', 'calvo', '#a16207', '#1f2937', ['lentes']), title: 'La pieza perdida',
+    steps: [
+      { say: 'Se perdió una pieza del museo: un quipu. ¿Quiénes lo usaban para registrar información?', o: ['Los egipcios', 'Los incas', 'Los romanos', 'Los aztecas'], c: 1, e: 'Los incas usaban los quipus, cuerdas con nudos, para llevar cuentas y registros.' },
+      { say: 'Caral es una de las ciudades más antiguas de América. ¿En qué región del Perú está?', o: ['Cusco', 'Arequipa', 'Lima', 'Puno'], c: 2, e: 'Caral está en el valle de Supe, en la región Lima.' },
+      { say: 'Última pista: ¿cuál fue la capital del Tahuantinsuyo?', o: ['Lima', 'Cusco', 'Arequipa', 'Trujillo'], c: 1, e: 'Cusco fue la capital del Tahuantinsuyo, el imperio inca.' }
+    ], end: '¡Encontramos la pieza! El museo la exhibirá con una placa con tu nombre.', xp: 60, coins: 30 },
+  cyt: { id: 'q_cyt', npc: NP('Dra. Elena', '#f1c27d', '#2b2b2b', 'chongo', '#8b5cf6', '#1f2937', ['lentes'], 'chica'), title: 'La noche de los planetas',
+    steps: [
+      { say: 'Esta noche el telescopio apunta a los planetas. ¿Cuál es el planeta más cercano al Sol?', o: ['Venus', 'Mercurio', 'Marte', 'Júpiter'], c: 1, e: 'Mercurio es el planeta más cercano al Sol.' },
+      { say: 'En mi laboratorio estudio los estados de la materia. ¿Cuál tiene forma y volumen definidos?', o: ['Líquido', 'Gaseoso', 'Sólido', 'Plasma'], c: 2, e: 'Los sólidos tienen forma y volumen propios.' },
+      { say: '¿Cuánto tarda la Tierra en dar una vuelta completa alrededor del Sol?', o: ['24 horas', '30 días', '7 días', '365 días'], c: 3, e: 'Un año: unos 365 días.' }
+    ], end: '¡Qué noche tan científica! Registramos todo en el cuaderno del observatorio.', xp: 60, coins: 30 },
+  edf: { id: 'q_edf', npc: NP('Profe Diego', '#c68642', '#2b2b2b', 'cresta', '#22c55e', '#1f2937', []), title: 'El torneo del barrio',
+    steps: [
+      { say: 'Hoy hay torneo en el coliseo. Antes de hacer ejercicio, ¿qué debemos hacer?', o: ['Comer mucho', 'Dormir', 'Calentar los músculos', 'Nada'], c: 2, e: 'El calentamiento prepara el cuerpo y evita lesiones.' },
+      { say: 'Durante el partido hay que mantenerse hidratado. ¿Qué es lo mejor para tomar?', o: ['Gaseosa', 'Agua', 'Café', 'Energizante'], c: 1, e: 'El agua es la mejor forma de hidratarse.' },
+      { say: '¿Cuántos jugadores de cada equipo hay en la cancha en un partido de fútbol?', o: ['11', '9', '8', '6'], c: 0, e: 'En fútbol juegan 11 por equipo.' }
+    ], end: '¡Comienza el torneo! Gracias por ayudarme a organizar a los equipos.', xp: 60, coins: 30 },
+  ept: { id: 'q_ept', npc: NP('Don Pedro', '#e0ac69', '#2b2b2b', 'corto', '#d97706', '#1f2937', ['gorra']), title: 'Mi primer negocio',
+    steps: [
+      { say: 'Quiero vender jugos. Preparar cada uno me cuesta S/ 2 y lo vendo a S/ 5. ¿Cuál es mi ganancia por jugo?', o: ['S/ 2', 'S/ 3', 'S/ 5', 'S/ 7'], c: 1, e: 'Ganancia = 5 − 2 = S/ 3 por jugo.' },
+      { say: 'Hoy vendí 20 jugos. ¿Cuánto gané en total?', o: ['S/ 40', 'S/ 100', 'S/ 60', 'S/ 20'], c: 2, e: '20 × S/ 3 = S/ 60 de ganancia.' },
+      { say: 'Mi hermana dice que necesito un presupuesto. ¿Qué es?', o: ['Una deuda', 'Un plan de ingresos y gastos', 'Un regalo', 'Un contrato de trabajo'], c: 1, e: 'Un presupuesto es un plan que organiza lo que ganas y lo que gastas.' }
+    ], end: '¡Mi negocio va viento en popa! Con tu ayuda aprendí a llevar mis cuentas.', xp: 60, coins: 30 },
+  rel: { id: 'q_rel', npc: NP('Hermana Rosa', '#f1c27d', '#cfcfcf', 'largo', '#f8fafc', '#475569', [], 'chica'), title: 'El festival de los valores',
+    steps: [
+      { say: 'Preparamos el festival de los valores. La solidaridad consiste en…', o: ['pensar solo en uno mismo', 'ayudar a quienes lo necesitan', 'competir con todos', 'guardar silencio siempre'], c: 1, e: 'Ser solidario es ayudar a los demás, sobre todo a quien lo necesita.' },
+      { say: 'El respeto se demuestra…', o: ['burlándose de las diferencias', 'ignorando a los demás', 'aceptando a las personas tal como son', 'imponiendo la propia opinión'], c: 2, e: 'Respetar es valorar a cada persona, aunque piense o sea distinta.' },
+      { say: 'Cuando alguien nos ofende y se arrepiente, el perdón sirve para…', o: ['reconciliarnos y convivir mejor', 'guardar rencor', 'vengarnos', 'alejarnos para siempre'], c: 0, e: 'El perdón repara la relación y nos hace convivir mejor.' }
+    ], end: '¡El festival fue un éxito! Gracias por poner en práctica tus valores.', xp: 60, coins: 30 }
+};
+function questDone(q) { return !!(S.me.hist && S.me.hist[q.id] && S.me.hist[q.id].done); }
+function openQuest(areaId) {
+  const qd = QUESTS[areaId], me = S.me; if (!qd) return; me.hist = me.hist || {}; const a = areaById(areaId);
+  const st = me.hist[qd.id] || (me.hist[qd.id] = { s: 0 }); S.quest = { areaId, qd, order: null };
+  if (st.done) { openModal(`${mhead(a.emoji, 'Misión cumplida')}<div class="mbody"><div class="say"><b>${esc(qd.npc.name)}:</b> ${esc(qd.end)}</div><p class="mute">Ya completaste «${esc(qd.title)}». ¡Gracias por tu ayuda!</p><button class="btn" data-m="close">Cerrar</button></div>`, { color: a.color }); return; }
+  renderQuestStep();
+}
+function renderQuestStep() {
+  const g = S.quest; if (!g) return; const qd = g.qd, st = S.me.hist[qd.id], step = qd.steps[st.s], a = areaById(g.areaId);
+  g.order = shuffle(step.o.map((_, i) => i)); g.solved = false;
+  openModal(`${mhead('❗', 'Misión: ' + qd.title)}<div class="mbody">
+    <div class="qhead"><span class="mute">${esc(qd.npc.name)} · Paso ${st.s + 1} de ${qd.steps.length}</span></div>
+    <div class="say"><b>${esc(qd.npc.name)}:</b> ${esc(step.say)}</div>
+    <div class="opts">${g.order.map(i => `<button class="opt" data-m="qsA" data-v="${i}">${esc(step.o[i])}</button>`).join('')}</div><div id="qsFb"></div></div>`, { color: a.color });
+}
+function questAnswer(i) {
+  const g = S.quest; if (!g || g.solved) return; const step = g.qd.steps[S.me.hist[g.qd.id].s], ok = i === step.c; beep(ok);
+  const btn = document.querySelector('#modalCard .opt[data-v="' + i + '"]');
+  if (!ok) { if (btn) { btn.classList.add('bad'); btn.disabled = true; } toast('No es esa respuesta. ¡Piénsalo otra vez!'); return; }
+  g.solved = true; document.querySelectorAll('#modalCard .opt').forEach(b => { b.disabled = true; if (+b.dataset.v === step.c) b.classList.add('ok'); });
+  const last = S.me.hist[g.qd.id].s >= g.qd.steps.length - 1;
+  const fb = $('#qsFb'); if (fb) fb.innerHTML = `<div class="fb ok"><h3>¡Correcto!</h3><div>${esc(step.e)}</div></div><div class="row" style="margin-top:8px"><button class="btn mint" data-m="qsNext">${last ? 'Terminar misión' : 'Continuar'}</button></div>`;
+}
+function questNext() {
+  const g = S.quest; if (!g || !g.solved) return; const me = S.me, qd = g.qd, st = me.hist[qd.id], a = areaById(g.areaId); st.s++;
+  if (st.s < qd.steps.length) { persist(true); renderQuestStep(); return; }
+  st.done = true; me.xp += qd.xp; me.coins += qd.coins; me.res[g.areaId] = (me.res[g.areaId] || 0) + 6; giveFichas(2); persist(true); updateHUD();
+  if (S.qref && S.qref.areaId === g.areaId) { S.qref.mk.visible = false; S.qref.item.label = '✅ ' + qd.npc.name + ' (misión cumplida)'; }
+  openModal(`${mhead('🎉', '¡Misión cumplida!')}<div class="mbody"><div class="say"><b>${esc(qd.npc.name)}:</b> ${esc(qd.end)}</div><div class="fb ok"><h3>Recompensa</h3><div>+${qd.xp} XP · +${qd.coins} 🪙 · +6 ${RES[g.areaId][0]} ${esc(RES[g.areaId][1])} · +2 🎟️</div></div><button class="btn" data-m="close">Cerrar</button></div>`, { color: a.color });
+}
+function emojiSprite(ch) {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = '96px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'; x.fillText(ch, 64, 70);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true })); sp.scale.set(2.2, 2.2, 1); return sp;
+}
 function buildAreaWorld(areaId) {
   disposeArea();
   const a = areaById(areaId), temas = temasDe(areaId), names = Object.keys(temas);
@@ -2407,6 +2645,14 @@ function buildAreaWorld(areaId) {
   guide.scale.setScalar(1.05); guide.position.set(5, 0, 2); guide.rotation.y = -Math.PI / 3; root.add(guide);
   areaCols.push({ x: AREA_CX + 5, z: 2, r: 1 });
   areaItems.push({ key: 'guia', x: AREA_CX + 5, z: 2, r: 3.4, label: '🗺️ Hablar con el docente (mapa)', use: () => openMapa(areaId) });
+  const qd = QUESTS[areaId]; S.qref = null;
+  if (qd) {
+    const npc = buildAvatar(qd.npc); npc.scale.setScalar(1.05); npc.position.set(-5, 0, 2); npc.rotation.y = Math.PI / 3; root.add(npc);
+    areaCols.push({ x: AREA_CX - 5, z: 2, r: 1 });
+    const mk = emojiSprite('❗'); mk.position.set(-5, 4.8, 2); mk.userData.y0 = 4.8; root.add(mk); areaAnim.push(mk); mk.visible = !questDone(qd);
+    const item = { key: 'quest', x: AREA_CX - 5, z: 2, r: 3.4, label: questDone(qd) ? '✅ ' + qd.npc.name + ' (misión cumplida)' : '❗ Misión: ' + qd.title, use: () => openQuest(areaId) };
+    areaItems.push(item); S.qref = { areaId, mk, item };
+  }
   if (!names.length) {
     const msg = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), new THREE.MeshBasicMaterial({ map: plaqueTexture(['Aún no hay temas', 'para tu grado', 'en esta área']) })); msg.position.set(-6, 2.2, 2); root.add(msg);
   }
