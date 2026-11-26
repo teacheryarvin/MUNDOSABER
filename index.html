@@ -29,6 +29,7 @@ h1,h2,h3{font-family:var(--display);font-weight:400;margin:0;letter-spacing:.3px
 .btn.alt{background:#fff}
 .btn.mint{background:var(--mint);color:#fff}
 .btn.coral{background:var(--coral);color:#fff}
+.btn.sun{background:var(--sun);color:#1b2440}
 .btn.sm{padding:6px 12px;font-size:14px;border-radius:11px;box-shadow:0 3px 0 var(--ink)}
 .btn[disabled]{opacity:.45;pointer-events:none}
 .chip{background:#fff;border:3px solid var(--ink);border-radius:12px;padding:6px 12px;font-weight:800;font-size:14px}
@@ -233,6 +234,7 @@ th{background:var(--soft);position:sticky;top:0}
   </div>
   <div id="hudTools">
     <div id="coins">🪙 <span id="hudCoins">0</span></div>
+    <button class="btn sm sun" data-act="eval" id="btnEval" hidden>📝 Evaluación</button>
     <button class="btn sm" data-act="perfil">Mi progreso</button>
     <button class="btn sm" data-act="ranking">Ranking</button>
     <button class="btn sm" data-act="mundos">Mundos</button>
@@ -325,6 +327,26 @@ const AREAS = [
   { id:'rel',  nombre:'Educación Religiosa',      lugar:'Capilla',            emoji:'🕊️', color:'#a78bfa' }
 ];
 const areaById = id => AREAS.find(a => a.id === id);
+/* Competencias del CNEB por área (id estable → nombre corto) */
+const COMPETENCIAS = {
+  mat: [['mat1', 'Resuelve problemas de cantidad'], ['mat2', 'Resuelve problemas de regularidad, equivalencia y cambio'], ['mat3', 'Resuelve problemas de forma, movimiento y localización'], ['mat4', 'Resuelve problemas de gestión de datos e incertidumbre']],
+  com: [['com1', 'Se comunica oralmente en su lengua materna'], ['com2', 'Lee diversos tipos de textos escritos en su lengua materna'], ['com3', 'Escribe diversos tipos de textos en su lengua materna']],
+  ing: [['ing1', 'Se comunica oralmente en inglés como lengua extranjera'], ['ing2', 'Lee diversos tipos de textos escritos en inglés'], ['ing3', 'Escribe diversos tipos de textos en inglés']],
+  art: [['art1', 'Aprecia de manera crítica manifestaciones artístico-culturales'], ['art2', 'Crea proyectos desde los lenguajes artísticos']],
+  dpcc: [['dpcc1', 'Construye su identidad'], ['dpcc2', 'Convive y participa democráticamente en la búsqueda del bien común']],
+  soc: [['soc1', 'Construye interpretaciones históricas'], ['soc2', 'Gestiona responsablemente el espacio y el ambiente'], ['soc3', 'Gestiona responsablemente los recursos económicos']],
+  cyt: [['cyt1', 'Indaga mediante métodos científicos para construir conocimientos'], ['cyt2', 'Explica el mundo físico basándose en conocimientos sobre los seres vivos, materia y energía, biodiversidad, Tierra y universo'], ['cyt3', 'Diseña y construye soluciones tecnológicas para resolver problemas de su entorno']],
+  edf: [['edf1', 'Se desenvuelve de manera autónoma a través de su motricidad'], ['edf2', 'Asume una vida saludable'], ['edf3', 'Interactúa a través de sus habilidades sociomotrices']],
+  ept: [['ept1', 'Gestiona proyectos de emprendimiento económico o social']],
+  rel: [['rel1', 'Construye su identidad como persona humana, amada por Dios, digna, libre y trascendente'], ['rel2', 'Asume la experiencia del encuentro personal y comunitario con Dios en su proyecto de vida']]
+};
+const compName = id => { for (const a in COMPETENCIAS) { const c = COMPETENCIAS[a].find(x => x[0] === id); if (c) return c[1]; } return id; };
+const compArea = id => String(id).replace(/[0-9]+$/, '');
+function compStat(me, q, ok) {
+  markDay(me);
+  if (!q || !q.competencia) return;
+  me.comp = me.comp || {}; const c = me.comp[q.competencia] = me.comp[q.competencia] || { c: 0, t: 0 }; c.t++; if (ok) c.c++;
+}
 
 /* ---------- personalización del avatar ---------- */
 const PAL = {
@@ -437,8 +459,30 @@ const Store = {
   },
   /* ---------- sesiones: estudiante = anónima · docente = correo y clave ---------- */
   isTeacher() { try { const u = firebase.auth().currentUser; return !!u && !u.isAnonymous; } catch (e) { return false; } },
-  async teacherIn(email, pass) { await firebase.auth().signInWithEmailAndPassword(email, pass); },
-  async asStudent() { const a = firebase.auth(); if (a.currentUser && !a.currentUser.isAnonymous) await a.signOut(); if (!a.currentUser) await a.signInAnonymously(); },
+  async teacherIn(email, pass) {
+    const a = firebase.auth(), cr = await a.signInWithEmailAndPassword(email, pass), u = cr.user;
+    let p = null;
+    try { const ad = await this.db.collection('admins').doc(u.uid).get(); if (ad.exists) p = { role: 'admin', aulas: null, nombre: (ad.data() || {}).nombre || '' }; } catch (e) { console.warn(e); }
+    if (!p) { try { const d = await this.db.collection('docentes').doc(u.uid).get(); if (d.exists && d.data().activo !== false) p = { role: 'docente', aulas: d.data().aulas || [], nombre: d.data().nombre || '' }; } catch (e) { console.warn(e); } }
+    if (!p) { await a.signOut(); await a.signInAnonymously(); const er = new Error('sin-permiso'); er.code = 'sin-permiso'; throw er; }
+    TP.role = p.role; TP.aulas = p.aulas; TP.nombre = p.nombre; TP.uid = u.uid; return p;
+  },
+  async asStudent() { const a = firebase.auth(); TP.role = 'admin'; TP.aulas = null; TP.uid = null; if (a.currentUser && !a.currentUser.isAnonymous) await a.signOut(); if (!a.currentUser) await a.signInAnonymously(); },
+  /* ---------- docentes (solo administrador) ---------- */
+  async teachersAll() { const snap = await this.db.collection('docentes').get(); return snap.docs.map(d => Object.assign({ uid: d.id }, d.data())); },
+  async createTeacher(nombre, email, pass, aulas) {
+    const app2 = firebase.initializeApp(CONFIG.firebase, 'sec' + Date.now());   // conexión aparte: no cierra la sesión del administrador
+    let u;
+    try { const a2 = app2.auth(), cr = await a2.createUserWithEmailAndPassword(email, pass); u = cr.user; await a2.signOut(); }
+    finally { try { await app2.delete(); } catch (e) { console.warn(e); } }
+    await this.db.collection('docentes').doc(u.uid).set({ nombre, email, aulas, activo: true, creado: Date.now() });
+    await this._staff(u.uid, true);
+    return u.uid;
+  },
+  async _staff(uid, on) { if (!this.rtdb) return; try { await this.rtdb.ref('staff/' + uid).set(on ? true : null); } catch (e) { console.warn('No se pudo sincronizar staff en Realtime Database.', e); } },
+  async saveTeacher(uid, data) { await this.db.collection('docentes').doc(uid).set(data, { merge: true }); if ('activo' in data) await this._staff(uid, data.activo !== false); },
+  async deleteTeacher(uid) { await this.db.collection('docentes').doc(uid).delete(); await this._staff(uid, false); },
+  async teacherResetMail(email) { await firebase.auth().sendPasswordResetEmail(email); },
   _get(k, def) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? def; } catch (e) { return def; } },
   _set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn(e); } },
 
@@ -460,7 +504,7 @@ const Store = {
     this._set('ms_cache', { v: { retos: ver.retos, lecciones: ver.lecciones, juegos: ver.juegos }, retos, lecciones, juegos });
     return { retos, lecciones, juegos, config: this._cfgOf(cfg) };
   },
-  _cfgOf(c) { return { bimestreActual: c.bimestreActual || 1, abrirTodos: !!c.abrirTodos, chat: Object.assign({ seccion: true, grado: true, colegio: false, presencia: true }, c.chat || {}) }; },
+  _cfgOf(c) { return { bimestreActual: c.bimestreActual || 1, abrirTodos: !!c.abrirTodos, evalFase: c.evalFase || '', evalN: c.evalN || 10, chat: Object.assign({ seccion: true, grado: true, colegio: false, presencia: true }, c.chat || {}) }; },
   async _seedOnline(cfg) {
     const col = this.db.collection('contenido'), existing = {};
     if (cfg.seedv) { const all = await col.get(); all.forEach(d => { existing[d.id] = unpackItems(d.data()); }); }
@@ -549,7 +593,7 @@ const Store = {
     const cfg = Object.assign(def, this._get('ms_config', {})); cfg.chat = Object.assign({ seccion: true, grado: true, colegio: false, presencia: true }, cfg.chat || {}); return cfg;
   },
   async saveConfig(c) {
-    if (this.mode === 'online') return this.db.collection('config').doc('main').set({ bimestreActual: c.bimestreActual, abrirTodos: !!c.abrirTodos, chat: c.chat || {} }, { merge: true });
+    if (this.mode === 'online') return this.db.collection('config').doc('main').set({ bimestreActual: c.bimestreActual, abrirTodos: !!c.abrirTodos, evalFase: c.evalFase || '', evalN: c.evalN || 10, chat: c.chat || {} }, { merge: true });
     this._set('ms_config', c);
   },
 
@@ -560,6 +604,7 @@ const Store = {
   },
   async saveStudent(s) {
     s.updated = Date.now();
+    ensureWeek(s); s.wxp = wxpOf(s); s.wk_k = s.wk.k;
     if (this.mode === 'online') return this.db.collection('students').doc(s.id).set(s);
     const all = this._get('ms_students', {}); all[s.id] = s; this._set('ms_students', all);
   },
@@ -590,8 +635,31 @@ const Store = {
       const snap = await q.limit(200).get(); list = snap.docs.map(d => d.data()).sort((a, b) => b.xp - a.xp).slice(0, 20);
     }
     this._rk[key] = { t: Date.now(), list }; return list;
+  },
+  async topWeekly(scope, me) {
+    if (this.mode !== 'online') return this.allStudents();
+    const key = 'w|' + scope + '|' + me.grado + '|' + me.seccion, hit = this._rk[key];
+    if (hit && Date.now() - hit.t < 180000) return hit.list;
+    let q = this.db.collection('students').where('wk_k', '==', weekKey());
+    if (scope === 'seccion') q = q.where('grado', '==', me.grado).where('seccion', '==', me.seccion);
+    else if (scope === 'grado') q = q.where('grado', '==', me.grado);
+    const snap = await q.limit(300).get();
+    const list = snap.docs.map(d => d.data()).sort((a, b) => (b.wxp || 0) - (a.wxp || 0)).slice(0, 20);
+    this._rk[key] = { t: Date.now(), list }; return list;
   }
 };
+
+/* ---------- semana (ranking por progreso personal) ---------- */
+function weekKey(d) {
+  d = d ? new Date(d) : new Date();
+  const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function ensureWeek(m) {
+  const k = weekKey();
+  if (!m.wk || m.wk.k !== k) m.wk = { k, base: m.xp || 0 };
+}
+function wxpOf(m) { ensureWeek(m); return Math.max(0, (m.xp || 0) - m.wk.base); }
 
 /* =====================================================================
    MUNDO 3D
@@ -1540,6 +1608,7 @@ function buildCityScene() {
 /* =====================================================================
    ESTADO, ENTRADA Y BUCLE PRINCIPAL
    ===================================================================== */
+const TP = { role: 'admin', aulas: null, nombre: '', uid: null };   // perfil del docente en sesión (aulas null = todas)
 const S = { mode: 'menu', me: null, retos: [], near: null, lock: false, teacher: false, session: null, lastPos: null, snap: true, world: 'plaza', areaId: null, lecciones: [], dirty: false, bim: 1, config: { bimestreActual: 1, abrirTodos: false, chat: { seccion: true, grado: true, colegio: false, presencia: true } }, juegos: [], mg: null, timer: null };
 let player = null, keys = {}, camYaw = 0;
 const joy = { x: 0, y: 0, active: false };
@@ -1710,7 +1779,7 @@ window.addEventListener('pagehide', () => persist(true));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persist(true); });
 
 function updateHUD() {
-  const m = S.me; if (!m) return;
+  const m = S.me; if (!m) return; evalBtn();
   const L = levelOf(m.xp), a = lvlStart(L), b = lvlStart(L + 1);
   $('#hudName').textContent = shortName(m);
   $('#hudLv').textContent = `Nv ${L} · ${lvlTitle(L)} · ${m.grado}° ${m.seccion}`;
@@ -1769,8 +1838,8 @@ $('#loginCard').addEventListener('submit', async e => {
       if (!st) { st = newStudent(ape, nom, grado, sec, id); nuevo = true; }
       st.pinHash = h; await Store.saveStudent(st);
     }
-    st.owned = st.owned || []; st.ok = st.ok || {}; st.temas = st.temas || {}; st.stats = st.stats || {}; st.badges = st.badges || []; st.res = st.res || {}; st.city = st.city || []; st.bosses = st.bosses || {}; st.lessons = st.lessons || {};
-    S.me = st; setPlayerAvatar(st.avatar); S.bim = allowedBim(st.bim); applyWorld(S.bim);
+    st.owned = st.owned || []; st.ok = st.ok || {}; st.temas = st.temas || {}; st.stats = st.stats || {}; st.badges = st.badges || []; st.res = st.res || {}; st.city = st.city || []; st.bosses = st.bosses || {}; st.lessons = st.lessons || {}; st.comp = st.comp || {}; st.evals = st.evals || {}; st.rec = st.rec || {};
+    ensureWeek(st); S.me = st; setPlayerAvatar(st.avatar); S.bim = allowedBim(st.bim); applyWorld(S.bim);
     pinReset();
     if (nuevo) enterCreator(true); else enterPlay();
   } catch (err) { console.error(err); toast('No se pudo conectar. Revisa tu internet e inténtalo de nuevo.'); }
@@ -1857,43 +1926,149 @@ function openPerfil() {
   }).join('');
   const badges = me.badges.map(k => { const [aid, ...rest] = k.split('|'), ar = areaById(aid); return `<span class="tag" style="font-size:14px">🏅 ${esc(rest.join('|'))}${ar ? ' · ' + esc(ar.nombre) : ''}</span>`; }).join('');
   openModal(`${mhead('⭐', 'Mi progreso')}<div class="mbody">
-    <div class="kpis"><div class="kpi"><b>${L}</b>${lvlTitle(L)}</div><div class="kpi"><b>${me.xp}</b>XP total</div><div class="kpi"><b>${precOf(me)}%</b>de aciertos</div><div class="kpi"><b>${Object.keys(me.ok).length}</b>retos dominados</div><div class="kpi"><b>${Object.keys(me.bosses || {}).length}</b>jefes vencidos</div><div class="kpi"><b>${(me.arena && me.arena.best) || 0}</b>récord en la Arena</div><div class="kpi"><b>${me.bw || 0}</b>batallas ganadas</div></div>
+    <div class="kpis"><div class="kpi"><b>${L}</b>${lvlTitle(L)}</div><div class="kpi"><b>${me.xp}</b>XP total</div><div class="kpi"><b>+${wxpOf(me)}</b>XP esta semana</div><div class="kpi"><b>${precOf(me)}%</b>de aciertos</div><div class="kpi"><b>${Object.keys(me.ok).length}</b>retos dominados</div><div class="kpi"><b>${Object.keys(me.bosses || {}).length}</b>jefes vencidos</div><div class="kpi"><b>${(me.arena && me.arena.best) || 0}</b>récord en la Arena</div><div class="kpi"><b>${me.bw || 0}</b>batallas ganadas</div></div>
     <div><div class="mute" style="margin-bottom:4px">Faltan ${a1 - me.xp} XP para el nivel ${L + 1}</div><div class="bar"><i style="width:${Math.round((me.xp - a0) / (a1 - a0) * 100)}%"></i></div></div>
     <div><h3 style="font-size:22px;margin-bottom:8px">Mis recursos · 🏙️ ${me.city.length} construcciones</h3>${AREAS.map(a => `<span class="tag" style="font-size:14px">${RES[a.id][0]} ${RES[a.id][1]}: ${me.res[a.id] || 0}</span>`).join('')}</div>
     <div><h3 style="font-size:22px;margin-bottom:8px">Avance por área</h3><div class="list">${rows || '<p class="mute">Aún no hay retos cargados para tu grado.</p>'}</div></div>
     <div><h3 style="font-size:22px;margin-bottom:8px">Para reforzar</h3><div class="list">${weak || '<p class="mute">Por ahora no tienes temas que reforzar. ¡Sigue así!</p>'}</div></div>
+    <div><h3 style="font-size:22px;margin-bottom:8px">Mis reconocimientos</h3><p class="mute" style="margin:0 0 6px">🔥 Semanas seguidas practicando: <b>${semActual(me.rec)}</b> · 🤝 Retos en equipo: <b>${(me.rec || {}).equipos || 0}</b> · 💪 Temas superados: <b>${(me.rec || {}).mejoras || 0}</b></p>${LOGROS.map(l => { const got = ((me.rec || {}).got || {})[l.id], v = recVal(me.rec || {}, l.f); return `<span class="tag" style="font-size:14px;${got ? '' : 'opacity:.6'}">${got ? l.e : '🔒'} ${esc(l.n)} <span class="mute">· ${got ? esc(l.d) : Math.min(v, l.goal) + '/' + l.goal + ' ' + esc(l.d)}</span></span>`; }).join('')}</div>
     <div><h3 style="font-size:22px;margin-bottom:8px">Mis insignias</h3>${badges || '<p class="mute">Consigue 80% de aciertos en un tema para ganar tu primera insignia.</p>'}</div></div>`);
 }
 
+/* ---------- reconocimiento de esfuerzo y colaboración ---------- */
+const ymd = (d) => { d = d ? new Date(d) : new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const LOGROS = [
+  { id: 'c1', e: '🔥', n: 'Constante', d: 'practicar 2 semanas seguidas', f: 'sem', goal: 2 },
+  { id: 'c2', e: '⚡', n: 'Imparable', d: 'practicar 4 semanas seguidas', f: 'sem', goal: 4 },
+  { id: 'c3', e: '🌟', n: 'Hábito de campeón', d: 'practicar 8 semanas seguidas', f: 'sem', goal: 8 },
+  { id: 'a1', e: '🤝', n: 'Primer reto en equipo', d: 'terminar un reto en equipo', f: 'equipos', goal: 1 },
+  { id: 'a2', e: '💬', n: 'Compañero de apoyo', d: 'animar o ayudar 10 veces en tu equipo', f: 'apoyo', goal: 10 },
+  { id: 'a3', e: '🏅', n: 'Alma del equipo', d: 'terminar 5 retos en equipo', f: 'equipos', goal: 5 },
+  { id: 'a4', e: '💛', n: 'Corazón del equipo', d: 'animar o ayudar 30 veces en tu equipo', f: 'apoyo', goal: 30 },
+  { id: 's1', e: '💪', n: 'Superación', d: 'superar 1 tema que te costaba', f: 'mejoras', goal: 1 },
+  { id: 's2', e: '🧗', n: 'Escalador', d: 'superar 3 temas que te costaban', f: 'mejoras', goal: 3 },
+  { id: 's3', e: '🏔️', n: 'Sin límites', d: 'superar 6 temas que te costaban', f: 'mejoras', goal: 6 }
+];
+const FRASES_APOYO = [4, 5, 6, 11];   // ¡Muy bien! · Vamos con calma · Revisemos juntos · ¡Buen trabajo, equipo!
+const recVal = (rc, f) => f === 'sem' ? ((rc.sem && rc.sem.best) || 0) : (rc[f] || 0);
+function checkRec() {
+  const me = S.me; if (!me) return; const rc = me.rec = me.rec || {}; rc.got = rc.got || {};
+  const nuevos = LOGROS.filter(l => !rc.got[l.id] && recVal(rc, l.f) >= l.goal);
+  nuevos.forEach(l => { rc.got[l.id] = Date.now(); me.xp += 15; me.coins += 5; });
+  if (nuevos.length) { toast('🏅 Nuevo reconocimiento: ' + nuevos.map(l => l.e + ' ' + l.n).join(', ') + ' (+' + 15 * nuevos.length + ' XP)'); S.dirty = true; updateHUD(); }
+}
+function recInc(f) { const me = S.me; if (!me) return; const rc = me.rec = me.rec || {}; rc[f] = (rc[f] || 0) + 1; checkRec(); }
+function markDay(me) {
+  const rc = me.rec = me.rec || {}, td = ymd(); if (rc.day === td) return;
+  rc.day = td; rc.dias = (rc.dias || 0) + 1;
+  const wk = weekKey(), sm = rc.sem = rc.sem || { n: 0, best: 0, last: '' };
+  if (sm.last !== wk) { sm.n = sm.last === weekKey(Date.now() - 7 * 86400000) ? sm.n + 1 : 1; sm.last = wk; sm.best = Math.max(sm.best, sm.n); }
+  checkRec();
+}
+function semActual(rc) { const sm = rc && rc.sem; return sm && (sm.last === weekKey() || sm.last === weekKey(Date.now() - 7 * 86400000)) ? sm.n : 0; }
+function recApoyo(k) {
+  const me = S.me; if (!me || !FRASES_APOYO.includes(k)) return;
+  const rc = me.rec = me.rec || {}, d = ymd(); if (rc.apD !== d) { rc.apD = d; rc.apN = 0; }
+  if (rc.apN >= 5) return;   // tope diario para que no se pueda «fabricar» el reconocimiento
+  rc.apN++; recInc('apoyo'); persist();
+}
+function recWeak(me, k, st) { if (st.t >= 3 && st.c / st.t < 0.6) { const rc = me.rec = me.rec || {}; (rc.weak = rc.weak || {})[k] = 1; } }
+
+/* ---------- evaluación de entrada y de salida ---------- */
+const EV_NAME = { entrada: 'Evaluación de entrada', salida: 'Evaluación de salida' };
+const hash32 = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+const evalFase = () => S.config.evalFase || '';
+function evalBtn() { const b = $('#btnEval'); if (b) b.hidden = !(evalFase() && S.me); }
+function evalPool(areaId) { return S.retos.filter(r => r.area === areaId && (r.grados || []).includes(S.me.grado) && r.tipo && (r.tipo !== 'mcq' || (r.opciones || []).filter(o => String(o).trim()).length >= 2)); }
+function evalItems(areaId, fase) {
+  const me = S.me, prev = me.evals && me.evals.entrada && me.evals.entrada[areaId];
+  if (fase === 'salida' && prev && prev.ids) { const l = prev.ids.map(id => S.retos.find(r => r.id === id)).filter(Boolean); if (l.length) return l; }   // las mismas preguntas que en la entrada
+  return evalPool(areaId).sort((a, b) => hash32(a.id + '|ev') - hash32(b.id + '|ev') || a.id.localeCompare(b.id)).slice(0, S.config.evalN || 10);
+}
+function openEval() {
+  const f = evalFase(), me = S.me; if (!f || !me) { toast('No hay ninguna evaluación abierta.'); return; }
+  me.evals = me.evals || {}; const done = me.evals[f] = me.evals[f] || {}, en = me.evals.entrada || {};
+  const rows = AREAS.map(a => {
+    const n = evalPool(a.id).length; if (!n) return '';
+    const d = done[a.id], e0 = en[a.id];
+    const info = d ? 'Completada · ' + Math.round(d.c / d.t * 100) + '%' + (f === 'salida' && e0 ? ' (entrada ' + Math.round(e0.c / e0.t * 100) + '%)' : '') : Math.min(n, S.config.evalN || 10) + ' preguntas';
+    return `<div class="rcard"><p>${a.emoji} <b>${esc(a.nombre)}</b><br><span class="mute">${info}</span></p>${d ? '<span class="tag">✅</span>' : `<button class="btn sm mint" data-m="evgo" data-a="${a.id}">Empezar</button>`}</div>`;
+  }).join('');
+  openModal(`${mhead('📝', EV_NAME[f])}<div class="mbody"><div class="say">${f === 'entrada' ? 'Esta evaluación muestra desde dónde partes. No da XP y no te dice las respuestas: responde con calma, ¡no importa si fallas!' : 'Esta es la evaluación final: verás cuánto avanzaste desde la de entrada. Son las mismas preguntas, sin mostrar las respuestas.'} Solo puedes rendirla una vez por área.</div><div class="list">${rows || '<p class="mute">Aún no hay retos cargados para tu grado.</p>'}</div></div>`);
+}
+function startEval(areaId) {
+  const f = evalFase(); if (!f) return;
+  const list = evalItems(areaId, f); if (!list.length) { toast('Esta área todavía no tiene retos para tu grado.'); return; }
+  S.ev = { fase: f, areaId, list, i: 0, res: [], comp: {}, lock: false }; renderEval();
+}
+function renderEval() {
+  const e = S.ev, r = e.list[e.i], a = areaById(e.areaId); e.lock = false;
+  e.order = r.tipo === 'mcq' ? shuffle(r.opciones.map((_, i) => i).filter(i => String(r.opciones[i]).trim() !== '')) : null;
+  let body;
+  if (r.tipo === 'mcq') body = `<div class="opts">${e.order.map(i => `<button class="opt" data-m="evans" data-v="${i}">${esc(r.opciones[i])}</button>`).join('')}</div>`;
+  else if (r.tipo === 'vf') body = `<div class="opts"><button class="opt" data-m="evans" data-v="true">✔ Verdadero</button><button class="opt" data-m="evans" data-v="false">✘ Falso</button></div>`;
+  else body = `<div class="row"><input id="evNum" inputmode="decimal" autocomplete="off" placeholder="Escribe tu respuesta"><button class="btn" data-m="evnum" style="flex:0 0 auto">Responder</button></div>`;
+  openModal(`${mhead(a.emoji, EV_NAME[e.fase] + ' · ' + a.nombre)}<div class="mbody"><div class="qhead"><span class="mute">Pregunta ${e.i + 1} de ${e.list.length}</span></div><div class="bar" style="--c:${a.color}"><i style="width:${Math.round(e.i / e.list.length * 100)}%"></i></div><div class="enun">${esc(r.enunciado)}</div>${body}</div>`, { color: a.color });
+  if (r.tipo === 'num') { const inp = $('#evNum'); setTimeout(() => inp.focus(), 60); inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); evalAnswer(inp.value); } }); }
+}
+function evalAnswer(val) {
+  const e = S.ev; if (!e || e.lock) return; const r = e.list[e.i];
+  if (r.tipo === 'num' && isNaN(parseFloat(String(val).replace(',', '.')))) { toast('Escribe un número.'); return; }
+  e.lock = true;
+  const v = r.tipo === 'mcq' ? +val : r.tipo === 'vf' ? val === 'true' : val, ok = evalAns(r, v);
+  e.res.push(ok);
+  if (r.competencia) { const c = e.comp[r.competencia] = e.comp[r.competencia] || { c: 0, t: 0 }; c.t++; if (ok) c.c++; }
+  if (e.i + 1 < e.list.length) { e.i++; renderEval(); } else finishEval();
+}
+function finishEval() {
+  const e = S.ev, me = S.me, a = areaById(e.areaId), c = e.res.filter(Boolean).length, t = e.res.length, pct = Math.round(c / t * 100);
+  me.evals = me.evals || {}; (me.evals[e.fase] = me.evals[e.fase] || {})[e.areaId] = { c, t, ts: Date.now(), ids: e.list.map(r => r.id), comp: e.comp };
+  S.dirty = true; persist(true);
+  const e0 = me.evals.entrada && me.evals.entrada[e.areaId], dif = e.fase === 'salida' && e0 ? pct - Math.round(e0.c / e0.t * 100) : null;
+  const msg = e.fase === 'entrada' ? 'Este es tu punto de partida. ¡Ahora a aprender y mejorar!' : dif === null ? '¡Terminaste la evaluación final!' : dif > 0 ? `¡Mejoraste ${dif} puntos desde la evaluación de entrada! 🎉` : dif === 0 ? 'Mantuviste tu nivel. ¡Sigue practicando!' : 'Esta vez bajaste un poco. Repasa los temas que más te cuestan y sigue practicando.';
+  S.ev = null;
+  openModal(`${mhead(a.emoji, EV_NAME[e.fase] + ' · ' + a.nombre)}<div class="mbody"><div class="big">${e.fase === 'entrada' ? '🧭' : dif > 0 ? '🏆' : '💪'}</div><h2 style="text-align:center;font-size:26px">${esc(msg)}</h2><div class="kpis"><div class="kpi"><b>${c}/${t}</b>correctas</div><div class="kpi"><b>${pct}%</b>de aciertos</div>${e0 && e.fase === 'salida' ? `<div class="kpi"><b>${Math.round(e0.c / e0.t * 100)}%</b>en la entrada</div>` : ''}</div><div class="row"><button class="btn mint" data-m="evlist">Ver otras áreas</button><button class="btn alt" data-m="close">Cerrar</button></div></div>`, { color: a.color });
+}
+const evAvg = (s, f) => { const d = Object.values((s.evals || {})[f] || {}).filter(x => x && x.t); return d.length ? Math.round(d.reduce((x, y) => x + y.c / y.t, 0) / d.length * 100) : null; };
+
 /* ---------- ranking ---------- */
+const RK = { week: true, tab: 'seccion' };
 async function openRanking(tab) {
-  tab = tab || 'seccion'; const me = S.me;
+  tab = tab || 'seccion'; RK.tab = tab; const me = S.me, wk = RK.week;
+  const unit = s => !wk ? s.xp : s.id === me.id ? wxpOf(me) : (s.wk_k === weekKey() ? (s.wxp || 0) : 0);
   openModal(`${mhead('🏆', 'Ranking')}<div class="mbody"><p class="mute">Cargando…</p></div>`);
   let all = [];
-  try { all = await Store.topStudents(tab, me); } catch (e) { console.warn(e); toast('No se pudo leer el ranking.'); }
+  try { all = await (wk ? Store.topWeekly(tab, me) : Store.topStudents(tab, me)); } catch (e) { console.warn(e); toast('No se pudo leer el ranking.'); }
   const outside = Store.mode === 'online' && !all.some(s => s.id === me.id);
   if (!outside && !all.some(s => s.id === me.id)) all.push(me);
   all = all.map(s => s.id === me.id ? me : s);
   let list = all;
   if (tab === 'seccion') list = all.filter(s => s.grado === me.grado && s.seccion === me.seccion);
   if (tab === 'grado') list = all.filter(s => s.grado === me.grado);
-  list = list.slice().sort((a, b) => b.xp - a.xp || precOf(b) - precOf(a));
-  const pod = (s, cls, medal) => s ? `<div class="${cls}"><div class="m">${medal}</div><b>${esc(shortName(s))}</b><span class="mute">Nv ${levelOf(s.xp)} · ${s.xp} XP</span></div>` : '<div></div>';
-  const rk = (s, i) => `<div class="rk ${s.id === me.id ? 'me' : ''}"><span>${i + 1}°</span><span class="face" style="background:${esc(s.avatar.shirt)};color:${s.avatar.shirt === '#f8fafc' ? '#1b2440' : '#fff'}">${esc(s.nombres.charAt(0))}</span><span>${esc(shortName(s))} <span class="mute">· ${s.grado}° ${esc(s.seccion)}</span></span><span>Nv ${levelOf(s.xp)} · ${s.xp} XP · 🏙️ ${(s.city || []).length}</span></div>`;
+  list = list.slice().sort((a, b) => unit(b) - unit(a) || precOf(b) - precOf(a));
+  const lbl = s => wk ? `+${unit(s)} XP esta semana` : `Nv ${levelOf(s.xp)} · ${s.xp} XP`;
+  const pod = (s, cls, medal) => s ? `<div class="${cls}"><div class="m">${medal}</div><b>${esc(shortName(s))}</b><span class="mute">${lbl(s)}</span></div>` : '<div></div>';
+  const rk = (s, i) => `<div class="rk ${s.id === me.id ? 'me' : ''}"><span>${i + 1}°</span><span class="face" style="background:${esc(s.avatar.shirt)};color:${s.avatar.shirt === '#f8fafc' ? '#1b2440' : '#fff'}">${esc(s.nombres.charAt(0))}</span><span>${esc(shortName(s))} <span class="mute">· ${s.grado}° ${esc(s.seccion)}</span></span><span>${lbl(s)} · 🏙️ ${(s.city || []).length}</span></div>`;
   const rest = list.slice(3, 15).map((s, i) => rk(s, i + 3)).join('');
   const myPos = list.findIndex(s => s.id === me.id);
   const tabs = [['seccion', `Mi sección (${me.grado}° ${me.seccion})`], ['grado', `Mi grado (${me.grado}°)`], ['colegio', 'Todo el colegio']];
   openModal(`${mhead('🏆', 'Salón de la fama')}<div class="mbody">
+    <div class="tabs"><button class="chip ${wk ? 'on' : ''}" data-m="rk" data-w="w" data-t="${tab}">📈 Esta semana</button><button class="chip ${!wk ? 'on' : ''}" data-m="rk" data-w="t" data-t="${tab}">⭐ Total</button></div>
     <div class="tabs">${tabs.map(([id, n]) => `<button class="chip ${tab === id ? 'on' : ''}" data-m="rk" data-t="${id}">${n}</button>`).join('')}</div>
     <div class="pod">${pod(list[1], 'p2', '🥈')}${pod(list[0], 'p1', '🥇')}${pod(list[2], 'p3', '🥉')}</div>
     <div class="list">${rest}${myPos >= 15 ? rk(me, myPos) : ''}</div>
-    <p class="mute">${outside ? 'Todavía no estás entre los 20 primeros. ¡Sigue practicando!' : 'Tu puesto: ' + (myPos + 1) + '° de ' + list.length + '.'} El ranking se ordena por experiencia (XP).${Store.mode === 'local' ? ' Incluye solo a los estudiantes que jugaron en este equipo.' : ''}</p></div>`);
+    <p class="mute">${outside ? 'Todavía no estás entre los 20 primeros. ¡Sigue practicando!' : 'Tu puesto: ' + (myPos + 1) + '° de ' + list.length + '.'} ${wk ? 'Aquí cuenta cuánto avanzaste esta semana: cada lunes todos empiezan de cero.' : 'El ranking se ordena por experiencia total (XP).'}${Store.mode === 'local' ? ' Incluye solo a los estudiantes que jugaron en este equipo.' : ''}</p></div>`);
 }
 
 /* =====================================================================
    PANEL DOCENTE
    ===================================================================== */
-const T = { tab: 'retos', fArea: '', fGrado: '', fBim: '', draft: null, pg: '', ps: '' };
+const T = { tab: 'retos', fArea: '', fGrado: '', fBim: '', draft: null, pg: '', ps: '', dEdit: null };
+const SECS = ['A', 'B', 'C', 'D', 'E'];
+const aulaOk = (g, s) => TP.aulas === null || TP.aulas.includes(String(g) + s);
+const gradoOk = g => TP.aulas === null || TP.aulas.some(x => x.charAt(0) === String(g));
+const gradosPerm = () => [1, 2, 3, 4, 5].filter(gradoOk);
+const seccsPerm = () => SECS.filter(s => TP.aulas === null || TP.aulas.some(x => x.slice(1) === s));
 function openDocenteLogin() {
   if (S.teacher) { openDocente(); return; }
   const online = Store.mode === 'online';
@@ -1909,29 +2084,31 @@ async function docenteLogin() {
       await Store.teacherIn(em, pw); S.teacher = true;
       try { const c = await Store.loadContent(); S.retos = c.retos; S.lecciones = c.lecciones; S.config = c.config; S.juegos = c.juegos; } catch (e2) { console.warn(e2); }   // el docente siembra el contenido inicial si falta
       openDocente();
-    } catch (e) { console.warn(e); toast('Correo o clave incorrectos.'); }
+    } catch (e) { console.warn(e); toast(e.code === 'sin-permiso' ? 'Tu cuenta no tiene acceso al panel docente (o está desactivada).' : 'Correo o clave incorrectos.'); }
   } else if ($('#tPass').value === CONFIG.claveDocente) { S.teacher = true; openDocente(); }
   else toast('Clave incorrecta.');
 }
 function openDocente(tab) {
   if (tab) T.tab = tab;
-  const tabs = [['retos', 'Retos por tema'], ['lecciones', 'Lecciones'], ['juegos', 'Juegos'], ['equipos', 'Equipos'], ['seguridad', 'Seguridad y chat'], ['conectados', 'Conectados ahora'], ['progreso', 'Progreso de estudiantes'], ['datos', 'Datos y respaldo']];
+  const adm = TP.role === 'admin';
+  const tabs = [['retos', 'Retos por tema'], ['lecciones', 'Lecciones'], ['juegos', 'Juegos'], ['equipos', 'Equipos'], ...(adm ? [['seguridad', 'Seguridad y chat']] : []), ['conectados', 'Conectados ahora'], ['progreso', 'Progreso de estudiantes'], ...(adm && Store.mode === 'online' ? [['docentes', 'Docentes']] : []), ...(adm ? [['datos', 'Datos y respaldo']] : [])];
+  if (!tabs.some(t => t[0] === T.tab)) T.tab = 'retos';
   openModal(`${mhead('👩‍🏫', 'Panel docente')}<div class="mbody"><div class="tabs">${tabs.map(([id, n]) => `<button class="chip ${T.tab === id ? 'on' : ''}" data-m="ttab" data-t="${id}">${n}</button>`).join('')}</div><div id="tBody"></div></div>`, { wide: true, color: '#c7e9ff' });
-  if (T.tab === 'retos') tRetos(); else if (T.tab === 'lecciones') tLecciones(); else if (T.tab === 'juegos') tJuegos(); else if (T.tab === 'equipos') tEquipos(); else if (T.tab === 'seguridad') tSeguridad(); else if (T.tab === 'conectados') tConectados(); else if (T.tab === 'progreso') tProgreso(); else tDatos();
+  if (T.tab === 'retos') tRetos(); else if (T.tab === 'lecciones') tLecciones(); else if (T.tab === 'juegos') tJuegos(); else if (T.tab === 'equipos') tEquipos(); else if (T.tab === 'seguridad') tSeguridad(); else if (T.tab === 'conectados') tConectados(); else if (T.tab === 'progreso') tProgreso(); else if (T.tab === 'docentes') tDocentes(); else tDatos();
 }
 const tipoName = { mcq: 'Opción múltiple', vf: 'Verdadero / falso', num: 'Respuesta numérica' };
 function tRetos() {
-  const list = S.retos.filter(r => (!T.fArea || r.area === T.fArea) && (!T.fGrado || (r.grados || []).includes(+T.fGrado)) && (!T.fBim || (r.bimestre || 1) === +T.fBim))
+  const list = S.retos.filter(r => TP.aulas === null || (r.grados || []).some(gradoOk)).filter(r => (!T.fArea || r.area === T.fArea) && (!T.fGrado || (r.grados || []).includes(+T.fGrado)) && (!T.fBim || (r.bimestre || 1) === +T.fBim))
     .sort((a, b) => a.area.localeCompare(b.area) || a.tema.localeCompare(b.tema));
   $('#tBody').innerHTML = `
     <div class="row" style="align-items:end;margin-bottom:12px">
       <div><label for="tfArea">Área</label><select id="tfArea"><option value="">Todas</option>${AREAS.map(a => `<option value="${a.id}" ${T.fArea === a.id ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
-      <div><label for="tfGrado">Grado</label><select id="tfGrado"><option value="">Todos</option>${[1, 2, 3, 4, 5].map(g => `<option value="${g}" ${String(T.fGrado) === String(g) ? 'selected' : ''}>${g}°</option>`).join('')}</select></div>
+      <div><label for="tfGrado">Grado</label><select id="tfGrado"><option value="">Todos</option>${gradosPerm().map(g => `<option value="${g}" ${String(T.fGrado) === String(g) ? 'selected' : ''}>${g}°</option>`).join('')}</select></div>
       <div><label for="tfBim">Bimestre</label><select id="tfBim"><option value="">Todos</option>${[1, 2, 3, 4].map(b => `<option value="${b}" ${String(T.fBim) === String(b) ? 'selected' : ''}>${ROMAN[b]} bimestre</option>`).join('')}</select></div>
       <div style="flex:0 0 auto"><button class="btn mint" data-m="tnew">Nuevo reto</button></div>
     </div>
     <p class="mute">${list.length} retos. Cada reto necesita una explicación: es la retroalimentación que verá el estudiante al responder.</p>
-    <div class="list">${list.map(r => { const a = areaById(r.area); return `<div class="rcard"><div><p>${esc(r.enunciado)}</p><span class="tag">${a ? a.emoji + ' ' + esc(a.nombre) : esc(r.area)}</span><span class="tag">${esc(r.tema)}</span><span class="tag">${(r.grados || []).join('°, ')}°</span><span class="tag">${tipoName[r.tipo] || r.tipo}</span><span class="tag">${ROMAN[r.bimestre || 1]} bim.</span></div><div style="display:flex;gap:6px"><button class="btn sm" data-m="tedit" data-id="${esc(r.id)}">Editar</button><button class="btn sm coral" data-m="tdel" data-id="${esc(r.id)}">Borrar</button></div></div>`; }).join('') || '<p class="mute">No hay retos con este filtro.</p>'}</div>`;
+    <div class="list">${list.map(r => { const a = areaById(r.area); return `<div class="rcard"><div><p>${esc(r.enunciado)}</p><span class="tag">${a ? a.emoji + ' ' + esc(a.nombre) : esc(r.area)}</span><span class="tag">${esc(r.tema)}</span><span class="tag">${(r.grados || []).join('°, ')}°</span><span class="tag">${tipoName[r.tipo] || r.tipo}</span>${r.competencia ? `<span class="tag" title="${esc(compName(r.competencia))}">🎯 ${esc(compName(r.competencia).slice(0, 38))}…</span>` : ''}<span class="tag">${ROMAN[r.bimestre || 1]} bim.</span></div><div style="display:flex;gap:6px"><button class="btn sm" data-m="tedit" data-id="${esc(r.id)}">Editar</button><button class="btn sm coral" data-m="tdel" data-id="${esc(r.id)}">Borrar</button></div></div>`; }).join('') || '<p class="mute">No hay retos con este filtro.</p>'}</div>`;
 }
 function fillTipoBox(tipo, r) {
   const box = $('#fTipoBox');
@@ -1947,7 +2124,7 @@ function fillTipoBox(tipo, r) {
 }
 function renderRetoForm(r) {
   const nuevo = !r;
-  r = r ? JSON.parse(JSON.stringify(r)) : { id: uid(), area: T.fArea || 'mat', grados: T.fGrado ? [+T.fGrado] : [1], bimestre: T.fBim ? +T.fBim : 1, tema: '', tipo: 'mcq', enunciado: '', opciones: ['', '', '', ''], correcta: 0, explicacion: '', dificultad: 1 };
+  r = r ? JSON.parse(JSON.stringify(r)) : { id: uid(), area: T.fArea || 'mat', grados: T.fGrado ? [+T.fGrado] : [gradosPerm()[0] || 1], bimestre: T.fBim ? +T.fBim : 1, tema: '', tipo: 'mcq', enunciado: '', opciones: ['', '', '', ''], correcta: 0, explicacion: '', dificultad: 1 };
   T.draft = r;
   const temas = [...new Set(S.retos.map(x => x.tema))].sort();
   $('#tBody').innerHTML = `
@@ -1955,7 +2132,8 @@ function renderRetoForm(r) {
       <div><label for="fArea">Área</label><select id="fArea">${AREAS.map(a => `<option value="${a.id}" ${r.area === a.id ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
       <div><label for="fTema">Tema (nombre del nivel)</label><input id="fTema" list="dlTemas" value="${esc(r.tema)}" placeholder="Ej. Ecuaciones lineales"><datalist id="dlTemas">${temas.map(t => `<option value="${esc(t)}">`).join('')}</datalist></div>
     </div>
-    <div style="margin-bottom:10px"><label>Grados donde aparece</label><div class="tabs">${[1, 2, 3, 4, 5].map(g => `<label class="chip" style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" class="fg" value="${g}" ${(r.grados || []).includes(g) ? 'checked' : ''} style="width:auto"> ${g}°</label>`).join('')}</div></div>
+      <div style="margin-bottom:10px"><label for="fComp">Competencia del CNEB</label><select id="fComp"><option value="">(sin asignar)</option>${(COMPETENCIAS[r.area] || []).map(([id, n]) => `<option value="${id}" ${r.competencia === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
+    <div style="margin-bottom:10px"><label>Grados donde aparece</label><div class="tabs">${gradosPerm().map(g => `<label class="chip" style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" class="fg" value="${g}" ${(r.grados || []).includes(g) ? 'checked' : ''} style="width:auto"> ${g}°</label>`).join('')}</div></div>
     <div class="grid2" style="margin-bottom:10px">
       <div><label for="fTipo">Tipo de reto</label><select id="fTipo">${Object.entries(tipoName).map(([k, n]) => `<option value="${k}" ${r.tipo === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <div><label for="fDif">Dificultad</label><select id="fDif">${[[1, 'Fácil (10 XP)'], [2, 'Media (20 XP)'], [3, 'Difícil (30 XP)']].map(([v, n]) => `<option value="${v}" ${(r.dificultad || 1) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
@@ -1966,10 +2144,11 @@ function renderRetoForm(r) {
     <div style="margin-bottom:12px"><label for="fExp">Explicación que verá el estudiante al responder</label><textarea id="fExp">${esc(r.explicacion)}</textarea></div>
     <div class="row"><button class="btn alt" data-m="tcancel">Cancelar</button><button class="btn mint" data-m="tsave">${nuevo ? 'Guardar reto' : 'Guardar cambios'}</button></div>`;
   fillTipoBox(r.tipo, r);
+  $('#fArea').addEventListener('change', e => { $('#fComp').innerHTML = '<option value="">(sin asignar)</option>' + (COMPETENCIAS[e.target.value] || []).map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join(''); });
 }
 async function saveRetoForm() {
   const r = T.draft, tipo = $('#fTipo').value;
-  const obj = { id: r.id, area: $('#fArea').value, tema: $('#fTema').value.trim(), grados: $$('.fg').filter(c => c.checked).map(c => +c.value), tipo, enunciado: $('#fEnun').value.trim(), explicacion: $('#fExp').value.trim(), dificultad: +$('#fDif').value, bimestre: +$('#fBim').value, opciones: null, correcta: null };
+  const obj = { id: r.id, area: $('#fArea').value, tema: $('#fTema').value.trim(), grados: [...new Set([...$$('.fg').filter(c => c.checked).map(c => +c.value), ...((S.retos.find(x => x.id === r.id) || {}).grados || []).filter(g => !gradoOk(g))])].sort(), tipo, enunciado: $('#fEnun').value.trim(), explicacion: $('#fExp').value.trim(), dificultad: +$('#fDif').value, competencia: $('#fComp').value, bimestre: +$('#fBim').value, opciones: null, correcta: null };
   if (!obj.tema) return toast('Escribe el nombre del tema.');
   if (!obj.grados.length) return toast('Elige al menos un grado.');
   if (!obj.enunciado) return toast('Escribe el enunciado.');
@@ -1997,25 +2176,95 @@ async function saveRetoForm() {
 async function tProgreso() {
   const box = $('#tBody'); box.innerHTML = '<p class="mute">Cargando…</p>';
   let all = []; try { all = await Store.allStudents(); } catch (e) { box.innerHTML = '<p>No se pudo leer el progreso.</p>'; return; }
-  const list = all.filter(x => (!T.pg || String(x.grado) === String(T.pg)) && (!T.ps || x.seccion === T.ps)).sort((a, b) => a.apellidos.localeCompare(b.apellidos));
+  const list = all.filter(x => aulaOk(x.grado, x.seccion) && (!T.pg || String(x.grado) === String(T.pg)) && (!T.ps || x.seccion === T.ps)).sort((a, b) => a.apellidos.localeCompare(b.apellidos));
   T.list = list;
   const agg = {}; list.forEach(s => Object.entries(s.stats || {}).forEach(([k, v]) => { const a = agg[k] = agg[k] || { c: 0, t: 0 }; a.c += v.c; a.t += v.t; }));
   const weak = Object.entries(agg).filter(([, v]) => v.t >= 3).sort((x, y) => x[1].c / x[1].t - y[1].c / y[1].t).slice(0, 6).map(([k, v]) => {
     const [aid, ...rest] = k.split('|'), ar = areaById(aid);
     return `<li>${ar ? ar.emoji : ''} <b>${esc(rest.join('|'))}</b> (${ar ? esc(ar.nombre) : ''}): ${Math.round(v.c / v.t * 100)}% de aciertos en ${v.t} respuestas</li>`;
   }).join('');
+  const cagg = {}; list.forEach(s => Object.entries(s.comp || {}).forEach(([k, v]) => { const a = cagg[k] = cagg[k] || { c: 0, t: 0, n: 0 }; a.c += v.c; a.t += v.t; a.n++; }));
+  const sinComp = S.retos.filter(r => !r.competencia && (TP.aulas === null || (r.grados || []).some(gradoOk))).length;
+  const evRows = AREAS.map(a => {
+    let ne = 0, se = 0, ns = 0, ss = 0, nb = 0, sd = 0;
+    list.forEach(s => { const E = s.evals || {}, en = (E.entrada || {})[a.id], sa = (E.salida || {})[a.id]; if (en && en.t) { ne++; se += en.c / en.t; } if (sa && sa.t) { ns++; ss += sa.c / sa.t; } if (en && en.t && sa && sa.t) { nb++; sd += sa.c / sa.t - en.c / en.t; } });
+    if (!ne && !ns) return '';
+    const dd = nb ? Math.round(sd / nb * 100) : null;
+    return `<tr><td>${a.emoji} ${esc(a.nombre)}</td><td>${ne ? Math.round(se / ne * 100) + '% (' + ne + ')' : '—'}</td><td>${ns ? Math.round(ss / ns * 100) + '% (' + ns + ')' : '—'}</td><td>${dd === null ? '—' : (dd > 0 ? '▲ +' : dd < 0 ? '▼ ' : '= ') + dd + ' pts (' + nb + ')'}</td></tr>`;
+  }).join('');
+  const dot = p => p >= 80 ? '🟢' : p >= 60 ? '🟡' : '🔴';
+  const compRows = Object.entries(cagg).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => { const pc = Math.round(v.c / v.t * 100), ar = areaById(compArea(k)); return `<tr><td>${ar ? ar.emoji + ' ' + esc(ar.nombre) : ''}</td><td>${esc(compName(k))}</td><td>${v.t}</td><td>${dot(pc)} ${pc}%</td><td>${v.n}</td></tr>`; }).join('');
   box.innerHTML = `
     <div class="row" style="align-items:end;margin-bottom:12px">
-      <div><label for="pgSel">Grado</label><select id="pgSel"><option value="">Todos</option>${[1, 2, 3, 4, 5].map(g => `<option value="${g}" ${String(T.pg) === String(g) ? 'selected' : ''}>${g}°</option>`).join('')}</select></div>
-      <div><label for="psSel">Sección</label><select id="psSel"><option value="">Todas</option>${['A', 'B', 'C', 'D', 'E'].map(s => `<option ${T.ps === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+      <div><label for="pgSel">Grado</label><select id="pgSel"><option value="">Todos</option>${gradosPerm().map(g => `<option value="${g}" ${String(T.pg) === String(g) ? 'selected' : ''}>${g}°</option>`).join('')}</select></div>
+      <div><label for="psSel">Sección</label><select id="psSel"><option value="">Todas</option>${seccsPerm().map(s => `<option ${T.ps === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
       <div style="flex:0 0 auto"><button class="btn sm" data-m="tcsv">Descargar CSV</button></div>
     </div>
     <div class="kpis" style="margin-bottom:12px"><div class="kpi"><b>${list.length}</b>estudiantes</div><div class="kpi"><b>${list.length ? Math.round(list.reduce((a, s) => a + precOf(s), 0) / list.length) : 0}%</b>aciertos promedio</div><div class="kpi"><b>${list.reduce((a, s) => a + Object.keys(s.ok || {}).length, 0)}</b>retos dominados</div></div>
+    <h3 style="font-size:20px;margin-bottom:6px">Evaluación de entrada y de salida</h3>
+    ${evRows ? `<div class="tbl" style="margin-bottom:6px"><table><thead><tr><th>Área</th><th>Entrada (estudiantes)</th><th>Salida (estudiantes)</th><th>Mejora (quienes rindieron ambas)</th></tr></thead><tbody>${evRows}</tbody></table></div><p class="mute" style="margin:0 0 14px">Promedio de aciertos. La mejora son puntos porcentuales, calculados solo con estudiantes que rindieron entrada y salida en esa área.</p>` : '<p class="mute">Aún no hay evaluaciones rendidas. Ábrelas en «Datos y respaldo».</p>'}
+    <h3 style="font-size:20px;margin-bottom:6px">Logro por competencia (CNEB)</h3>
+    ${compRows ? `<div class="tbl" style="margin-bottom:6px"><table><thead><tr><th>Área</th><th>Competencia</th><th>Respuestas</th><th>Aciertos</th><th>Estudiantes</th></tr></thead><tbody>${compRows}</tbody></table></div><p class="mute" style="margin:0 0 14px">Cuenta solo los retos que tienen competencia asignada${sinComp ? ` (${sinComp} retos aún no la tienen: asígnala en «Retos por tema»)` : ''}. Semáforo: verde desde 80%, ámbar desde 60%, rojo por debajo.</p>` : `<p class="mute">Aún no hay respuestas con competencia. Asigna una competencia a tus retos en «Retos por tema».</p>`}
     <h3 style="font-size:20px;margin-bottom:6px">Temas que más cuestan</h3>
     ${weak ? `<ul style="margin:0 0 14px;padding-left:20px;font-weight:700">${weak}</ul>` : '<p class="mute">Aún no hay suficientes respuestas para detectar temas difíciles.</p>'}
-    <div class="tbl"><table><thead><tr><th>Estudiante</th><th>Gr./Sec.</th><th>Nivel</th><th>XP</th><th>Retos dominados</th><th>Aciertos</th><th>Insignias</th><th></th></tr></thead><tbody>
-    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${(s.badges || []).length}</td><td><button class="btn sm alt" data-m="tpin" data-id="${esc(s.id)}" aria-label="Reiniciar el PIN de ${esc(s.nombres)} ${esc(s.apellidos)}">🔑 PIN</button> <button class="btn sm coral" data-m="tdelst" data-id="${esc(s.id)}" aria-label="Eliminar a ${esc(s.nombres)} ${esc(s.apellidos)}">🗑️ Eliminar</button></td></tr>`).join('') || '<tr><td colspan="8" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
+    <div class="tbl"><table><thead><tr><th>Estudiante</th><th>Gr./Sec.</th><th>Nivel</th><th>XP</th><th>Retos dominados</th><th>Aciertos</th><th>Entrada</th><th>Salida</th><th>Esfuerzo</th><th>Insignias</th><th></th></tr></thead><tbody>
+    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${evAvg(s, 'entrada') === null ? '—' : evAvg(s, 'entrada') + '%'}</td><td>${evAvg(s, 'salida') === null ? '—' : evAvg(s, 'salida') + '%'}</td><td title="Mejor racha de semanas · apoyos en equipo · temas superados">🔥${recVal(s.rec || {}, 'sem')} 🤝${(s.rec || {}).apoyo || 0} 💪${(s.rec || {}).mejoras || 0}</td><td>${(s.badges || []).length}</td><td><button class="btn sm alt" data-m="tpin" data-id="${esc(s.id)}" aria-label="Reiniciar el PIN de ${esc(s.nombres)} ${esc(s.apellidos)}">🔑 PIN</button> <button class="btn sm coral" data-m="tdelst" data-id="${esc(s.id)}" aria-label="Eliminar a ${esc(s.nombres)} ${esc(s.apellidos)}">🗑️ Eliminar</button></td></tr>`).join('') || '<tr><td colspan="11" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
     </tbody></table></div>`;
+}
+/* ---------- administrador: docentes ---------- */
+const aulaTxt = a => (a && a.length) ? a.slice().sort().map(x => x.charAt(0) + '° ' + x.slice(1)).join(', ') : 'ninguna';
+async function tDocentes() {
+  const box = $('#tBody'); box.innerHTML = '<p class="mute">Cargando…</p>';
+  let list = []; try { list = await Store.teachersAll(); } catch (e) { console.error(e); box.innerHTML = '<p>No se pudo leer la lista de docentes. Revisa las reglas de Firestore (colección docentes).</p>'; return; }
+  T.dList = list.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+  const ed = T.dEdit ? T.dList.find(x => x.uid === T.dEdit) : null, sel = (ed && ed.aulas) || [];
+  const grid = `<table style="width:auto"><thead><tr><th></th>${SECS.map(s => `<th>${s}</th>`).join('')}</tr></thead><tbody>${[1, 2, 3, 4, 5].map(g => `<tr><th>${g}°</th>${SECS.map(s => `<td><input type="checkbox" class="dAula" value="${g}${s}" ${sel.includes(g + s) ? 'checked' : ''} style="width:22px;height:22px" aria-label="${g}° ${s}"></td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  box.innerHTML = `
+    <div class="say">Aquí creas las cuentas de los docentes y eliges qué aulas (grado y sección) puede ver cada uno. Quien no esté en esta lista no puede entrar al panel.</div>
+    <div class="panel" style="padding:14px;display:grid;gap:10px;margin:12px 0">
+      <h3 style="font-size:20px">${ed ? 'Editar a ' + esc(ed.nombre) : 'Nuevo docente'}</h3>
+      <div class="grid2">
+        <div><label for="dNom">Nombre completo</label><input id="dNom" value="${esc(ed ? ed.nombre : '')}"></div>
+        <div><label for="dMail">Correo</label><input id="dMail" type="email" value="${esc(ed ? ed.email : '')}" ${ed ? 'disabled' : ''}></div>
+      </div>
+      ${ed ? '' : '<div><label for="dPass">Clave temporal (mínimo 6 caracteres)</label><input id="dPass" type="text" autocomplete="off"></div>'}
+      <div><label>Aulas que puede ver</label><div class="tbl">${grid}</div><button class="btn sm alt" data-m="tdAll" style="margin-top:6px">Marcar / desmarcar todas</button></div>
+      <div class="row"><button class="btn mint" data-m="tdSave">${ed ? 'Guardar cambios' : 'Crear cuenta'}</button>${ed ? '<button class="btn alt" data-m="tdCancel">Cancelar</button>' : ''}</div>
+    </div>
+    <h3 style="font-size:20px;margin-bottom:6px">Docentes (${list.length})</h3>
+    <div class="list">${list.map(t => `<div class="rcard"><div><p><b>${esc(t.nombre)}</b> · <span class="mute">${esc(t.email)}</span></p><span class="tag">${t.activo === false ? '⛔ Desactivado' : '✅ Activo'}</span><span class="tag">Aulas: ${esc(aulaTxt(t.aulas))}</span></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-m="tdEdit" data-id="${esc(t.uid)}">Editar</button><button class="btn sm alt" data-m="tdAct" data-id="${esc(t.uid)}">${t.activo === false ? 'Activar' : 'Desactivar'}</button><button class="btn sm alt" data-m="tdMail" data-id="${esc(t.uid)}">✉️ Cambiar clave</button><button class="btn sm coral" data-m="tdDel" data-id="${esc(t.uid)}">Quitar</button></div></div>`).join('') || '<p class="mute">Todavía no creaste docentes.</p>'}</div>`;
+}
+async function tdSave() {
+  const nom = $('#dNom').value.trim(), aulas = $$('.dAula').filter(c => c.checked).map(c => c.value), ed = T.dEdit;
+  if (!nom) { toast('Escribe el nombre del docente.'); return; }
+  if (!aulas.length) { toast('Marca al menos un aula.'); return; }
+  try {
+    if (ed) { await Store.saveTeacher(ed, { nombre: nom, aulas }); T.dEdit = null; toast('Cambios guardados.'); }
+    else {
+      const mail = $('#dMail').value.trim().toLowerCase(), pw = $('#dPass').value;
+      if (!/^\S+@\S+\.\S+$/.test(mail)) { toast('Escribe un correo válido.'); return; }
+      if (pw.length < 6) { toast('La clave debe tener al menos 6 caracteres.'); return; }
+      await Store.createTeacher(nom, mail, pw, aulas); toast('Cuenta creada. Entrégale su correo y su clave temporal.');
+    }
+    tDocentes();
+  } catch (e) {
+    console.error(e);
+    toast(e.code === 'auth/email-already-in-use' ? 'Ese correo ya tiene una cuenta. Usa otro correo.' : e.code === 'auth/weak-password' ? 'La clave es muy débil.' : e.code === 'auth/invalid-email' ? 'El correo no es válido.' : 'No se pudo guardar. Revisa tu conexión y las reglas.');
+  }
+}
+async function tdAction(m, id) {
+  const t = (T.dList || []).find(x => x.uid === id); if (!t) return;
+  try {
+    if (m === 'tdEdit') { T.dEdit = id; tDocentes(); return; }
+    if (m === 'tdAct') { await Store.saveTeacher(id, { activo: t.activo === false }); toast(t.activo === false ? 'Docente activado.' : 'Docente desactivado.'); }
+    if (m === 'tdMail') { await Store.teacherResetMail(t.email); toast('Se envió un correo a ' + t.email + ' para cambiar la clave.'); return; }
+    if (m === 'tdDel') {
+      if (!confirm('¿Quitar a ' + t.nombre + '?\n\nYa no podrá entrar al panel. Su cuenta de correo seguirá existiendo en Firebase, pero sin ningún permiso.')) return;
+      await Store.deleteTeacher(id); toast('Docente quitado.');
+    }
+    tDocentes();
+  } catch (e) { console.error(e); toast('No se pudo completar la acción.'); }
 }
 async function tResetPin(id) {
   const st = (T.list || []).find(x => x.id === id); if (!st) return;
@@ -2039,6 +2288,7 @@ function tDatos() {
   $('#tBody').innerHTML = `
     <div class="say">Modo de almacenamiento: <b>${Store.mode === 'online' ? 'en línea (Firebase): ranking y progreso de todo el colegio' : 'local: los datos se guardan solo en este equipo'}</b>.</div>
     <div class="panel" style="padding:14px;display:grid;gap:8px;margin-top:12px"><h3 style="font-size:20px">Mundos por bimestre</h3><p class="mute" style="margin:0">Elige el bimestre en curso. Los estudiantes pueden viajar al mundo de ese bimestre y de los anteriores.</p><div class="row" style="align-items:end"><div><label for="cfgBim">Bimestre actual</label><select id="cfgBim">${[1, 2, 3, 4].map(b => `<option value="${b}" ${S.config.bimestreActual === b ? 'selected' : ''}>${ROMAN[b]} bimestre</option>`).join('')}</select></div><label class="chip" style="margin:0;display:flex;gap:6px;align-items:center;flex:0 0 auto"><input type="checkbox" id="cfgAll" ${S.config.abrirTodos ? 'checked' : ''} style="width:auto"> Abrir todos los mundos</label><button class="btn sm mint" data-m="tcfg" style="flex:0 0 auto">Guardar</button></div></div>
+    <div class="panel" style="padding:14px;display:grid;gap:8px;margin-top:12px"><h3 style="font-size:20px">Evaluación de entrada y de salida</h3><p class="mute" style="margin:0">Abre la evaluación que quieres que rindan los estudiantes. Usa las mismas preguntas en ambas, sin mostrar las respuestas, y una sola vez por área. Así puedes medir cuánto mejoraron.</p><div class="row" style="align-items:end"><div><label for="cfgEv">Evaluación abierta</label><select id="cfgEv">${[['', 'Cerrada'], ['entrada', 'Entrada (diagnóstico)'], ['salida', 'Salida (final)']].map(([v, n]) => `<option value="${v}" ${(S.config.evalFase || '') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div><div><label for="cfgEvN">Preguntas por área</label><select id="cfgEvN">${[5, 8, 10, 12, 15].map(n => `<option ${(S.config.evalN || 10) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div><button class="btn sm mint" data-m="tev" style="flex:0 0 auto">Guardar</button></div></div>
     <div class="grid2" style="margin-top:12px">
       <div class="panel" style="padding:14px;display:grid;gap:8px"><h3 style="font-size:20px">Respaldo de retos</h3><p class="mute" style="margin:0">Descarga todos los retos en un archivo o carga los de otro docente o equipo.</p><button class="btn sm" data-m="texp">Descargar retos (JSON)</button><input type="file" id="tImp" accept=".json,application/json" aria-label="Cargar retos desde un archivo JSON"></div>
       <div class="panel" style="padding:14px;display:grid;gap:8px"><h3 style="font-size:20px">Para activar el modo en línea</h3><p class="mute" style="margin:0">Crea un proyecto de Firebase con Firestore y pega su configuración en la constante CONFIG.firebase, al inicio del código de este archivo. La clave docente también se cambia ahí (CONFIG.claveDocente).</p></div>
@@ -2116,7 +2366,7 @@ $('#modalCard').addEventListener('click', e => {
       break;
     case 'mundo': chooseWorld(+d.b); break;
     case 'arena': startArena(d.f || $('#arenaSel').value); break;
-    case 'tcfg': S.config = { bimestreActual: +$('#cfgBim').value, abrirTodos: $('#cfgAll').checked, chat: S.config.chat }; Store.saveConfig(S.config).then(() => toast('Configuración guardada.')).catch(() => toast('No se pudo guardar.')); break;
+    case 'tcfg': S.config = { bimestreActual: +$('#cfgBim').value, abrirTodos: $('#cfgAll').checked, evalFase: S.config.evalFase || '', evalN: S.config.evalN || 10, chat: S.config.chat }; Store.saveConfig(S.config).then(() => toast('Configuración guardada.')).catch(() => toast('No se pudo guardar.')); break;
     case 'boss': startBoss(d.a, d.t); break;
     case 'leido': { const k = tkey(d.a, d.t); if (!S.me.lessons[k]) { S.me.lessons[k] = 1; S.me.xp += 5; persist(); updateHUD(); S.dirty = true; } startPractica(d.a, d.t); break; }
     case 'goto': { const sp = areaSpaces[+d.i]; if (sp) { closeModal(); player.position.set(sp.front.x, 0, sp.front.z); S.snap = true; } break; }
@@ -2130,10 +2380,18 @@ $('#modalCard').addEventListener('click', e => {
     case 'ans': answer(d.v); break;
     case 'numok': answer($('#numAns').value); break;
     case 'next': nextReto(); break;
-    case 'rk': openRanking(d.t); break;
+    case 'rk': if (d.w) RK.week = d.w === 'w'; openRanking(d.t || RK.tab); break;
     case 'tlogin': docenteLogin(); break;
     case 'ttab': T.tab = d.t; openDocente(); break;
     case 'tconRef': tConectados(); break;
+    case 'evgo': startEval(d.a); break;
+    case 'evans': evalAnswer(d.v); break;
+    case 'evnum': evalAnswer(($('#evNum') || {}).value); break;
+    case 'evlist': openEval(); break;
+    case 'tdSave': tdSave(); break;
+    case 'tdCancel': T.dEdit = null; tDocentes(); break;
+    case 'tdAll': { const cs = $$('.dAula'), on = cs.some(c => !c.checked); cs.forEach(c => { c.checked = on; }); break; }
+    case 'tdEdit': case 'tdAct': case 'tdMail': case 'tdDel': tdAction(d.m, d.id); break;
     case 'tdelst': tDeleteStudent(d.id); break;
     case 'tpin': tResetPin(d.id); break;
     case 'tnew': renderRetoForm(null); break;
@@ -2145,10 +2403,12 @@ $('#modalCard').addEventListener('click', e => {
         Store.deleteReto(d.id, (S.retos.find(r => r.id === d.id) || {}).area).then(() => { S.retos = S.retos.filter(r => r.id !== d.id); toast('Reto borrado.'); tRetos(); }).catch(() => toast('No se pudo borrar.'));
       } break;
     case 'texp': download('retos-mundosaber.json', JSON.stringify(S.retos, null, 2)); break;
+    case 'tev': S.config.evalFase = $('#cfgEv').value; S.config.evalN = +$('#cfgEvN').value || 10; Store.saveConfig(S.config).then(() => { toast('Evaluación guardada.'); evalBtn(); }).catch(() => toast('No se pudo guardar.')); break;
     case 'tcsv': {
+      const CIDS = Object.values(COMPETENCIAS).flat().map(x => x[0]);
       const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-      const rows = [['Apellidos', 'Nombres', 'Grado', 'Seccion', 'Nivel', 'XP', 'Monedas', 'Retos dominados', 'Aciertos %', 'Insignias', 'Construcciones']]
-        .concat((T.list || []).map(s => [s.apellidos, s.nombres, s.grado, s.seccion, levelOf(s.xp), s.xp, s.coins, Object.keys(s.ok || {}).length, precOf(s), (s.badges || []).length, (s.city || []).length]));
+      const rows = [['Apellidos', 'Nombres', 'Grado', 'Seccion', 'Nivel', 'XP', 'Monedas', 'Retos dominados', 'Aciertos %', 'Insignias', 'Construcciones', 'Entrada %', 'Salida %', 'Semanas seguidas (mejor)', 'Dias practicados', 'Apoyos en equipo', 'Retos en equipo', 'Temas superados', 'Reconocimientos', ...CIDS.map(id => 'Comp. ' + compName(id) + ' %')]]
+        .concat((T.list || []).map(s => [s.apellidos, s.nombres, s.grado, s.seccion, levelOf(s.xp), s.xp, s.coins, Object.keys(s.ok || {}).length, precOf(s), (s.badges || []).length, (s.city || []).length, evAvg(s, 'entrada') ?? '', evAvg(s, 'salida') ?? '', recVal(s.rec || {}, 'sem'), (s.rec || {}).dias || 0, (s.rec || {}).apoyo || 0, (s.rec || {}).equipos || 0, (s.rec || {}).mejoras || 0, Object.keys((s.rec || {}).got || {}).length, ...CIDS.map(id => { const c = (s.comp || {})[id]; return c && c.t ? Math.round(c.c / c.t * 100) : ''; })]));
       download('progreso-mundosaber.csv', '\ufeff' + rows.map(r => r.map(q).join(',')).join('\n'), 'text/csv;charset=utf-8'); break;
     }
   }
@@ -2169,6 +2429,7 @@ $('#hudTools').addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b || !S.me) return;
   if (b.dataset.act === 'perfil') openPerfil();
   else if (b.dataset.act === 'ranking') openRanking();
+  else if (b.dataset.act === 'eval') openEval();
   else if (b.dataset.act === 'plaza') exitArea();
   else if (b.dataset.act === 'mundos') openMundos();
   else if (b.dataset.act === 'equipo') openTeam();
@@ -2831,7 +3092,7 @@ function newSession(mode, areaId, tema, list) {
 }
 function startPractica(areaId, tema) {
   const list = buildRound(areaId, tema); if (!list.length) { toast('Este tema todavía no tiene retos.'); return; }
-  S.session = newSession('practica', areaId, tema, list); renderReto();
+  S.session = newSession('practica', areaId, tema, list); S.session.weak0 = !!(((S.me.rec || {}).weak || {})[tkey(areaId, tema)]); renderReto();
 }
 function startBoss(areaId, tema) {
   const bank = temasDe(areaId)[tema] || []; if (!bank.length) return;
@@ -2872,7 +3133,7 @@ function answer(val) {
   const v = r.tipo === 'mcq' ? +val : r.tipo === 'vf' ? val === 'true' : val;
   const ok = evalAns(r, v), me = S.me, k = tkey(r.area, r.tema), dif = r.dificultad || 1;
   const first = !r._retry && !s.seen.has(r.id);
-  if (first) { s.seen.add(r.id); const st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; s.total++; if (ok) s.firstTry++; if (!r.gen) { me.recent = me.recent || []; me.recent.push(r.id); if (me.recent.length > 40) me.recent.shift(); } }
+  if (first) { s.seen.add(r.id); const st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; compStat(me, r, ok); recWeak(me, k, st); s.total++; if (ok) s.firstTry++; if (!r.gen) { me.recent = me.recent || []; me.recent.push(r.id); if (me.recent.length > 40) me.recent.shift(); } }
   let gain = 0, rg = 0;
   if (s.mode === 'arena' || s.mode === 'timed') {
     if (ok) { s.streak++; s.score++; s.maxStreak = Math.max(s.maxStreak, s.streak); gain = 3 + Math.min(12, s.streak); if (s.score % 3 === 0) rg = 1; }
@@ -2916,6 +3177,8 @@ function finishPractica() {
   if (pct >= 0.8 && s.total >= 3 && (tp.nivel || 1) < 3) { tp.nivel = (tp.nivel || 1) + 1; nivelUp = true; }
   if (firstGood) { me.xp += 20; me.coins += 10; s.xp += 20; me.res[s.areaId] = (me.res[s.areaId] || 0) + 5; s.rg += 5; }
   if (pct >= 0.8 && s.total >= 2 && !me.badges.includes(k)) { me.badges.push(k); badge = true; }
+  let mejora = false;
+  if (s.weak0 && pct >= 0.8 && s.total >= 3) { mejora = true; delete me.rec.weak[k]; me.xp += 15; s.xp += 15; recInc('mejoras'); }
   const L = levelOf(me.xp), up = L > s.lv0, dom = Math.round(dominio(s.areaId, s.tema) * 100), refuerzos = s.list.filter(r => r._retry).length;
   S.dirty = true; persist(true); updateHUD();
   const emoji = stars === 3 ? '🏆' : stars === 2 ? '🎉' : stars === 1 ? '👍' : '💪';
@@ -2929,6 +3192,7 @@ function finishPractica() {
     ${s.rg ? '<div class="say">🏙️ Usa tus recursos en <b>Mi ciudad</b> para construir.</div>' : ''}
     ${firstGood ? '<div class="say">✨ Primer logro de este tema: +20 XP, +10 monedas y +5 recursos de bonificación.</div>' : ''}
     ${badge ? `<div class="say">🏅 Ganaste la insignia <b>${esc(s.tema)}</b> en ${esc(a.nombre)}.</div>` : ''}
+    ${mejora ? '<div class="say" style="background:var(--sun)">💪 ¡Superaste un tema que te costaba! Eso vale más que cualquier nota: +15 XP.</div>' : ''}
     ${nivelUp ? `<div class="say" style="background:var(--sun)">🔥 ¡Subiste al <b>nivel ${tp.nivel}</b> de este tema! Los retos serán más difíciles.</div>` : ''}
     ${up ? `<div class="say" style="background:var(--sun)">⬆️ ¡Subiste al nivel ${L}! Ahora eres <b>${lvlTitle(L)}</b>.</div>` : ''}
     ${bossHint}${allDone}
@@ -3221,7 +3485,7 @@ const starsByErrors = e => e === 0 ? 3 : e <= 2 ? 2 : e <= 4 ? 1 : 0;
 
 /* ---------- Carrera del saber ---------- */
 function mgQs(areaId, n) { const q = buildTeamQs(areaId, n + 4); return q ? q.filter(x => x.tipo === 'mcq' || x.tipo === 'vf').slice(0, n) : []; }
-function mgStat(q, ok) { const me = S.me, k = tkey(q.area, q.tema), st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; persist(); }
+function mgStat(q, ok) { const me = S.me, k = tkey(q.area, q.tema), st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; compStat(me, q, ok); persist(); }
 function startCarrera(areaId) {
   const qs = mgQs(areaId, 8); if (qs.length < 5) { toast('Todavía no hay suficientes retos de esta área para la carrera.'); return; }
   const bots = shuffle([['🚙', 'Turbo'], ['🛻', 'Nitro'], ['🚕', 'Rayo']]);
@@ -3656,7 +3920,7 @@ async function teamLeave() {
 async function teamSay(k) {
   const s = S.team, me = S.me; if (!s || Date.now() - s.lastSay < 1500) return; s.lastSay = Date.now();
   const r = await Store._teamMut(s.code, t => { t.msgs = (t.msgs || []).concat([{ id: me.id, n: shortName(me), k, t: Date.now() }]).slice(-30); });
-  if (r.error) toast(r.error);
+  if (r.error) toast(r.error); else recApoyo(k);
 }
 function buildTeamQs(areaId, n) {
   const base = shuffle(S.retos.filter(r => r.area === areaId && (r.grados || []).includes(S.me.grado) && (r.bimestre || 1) <= S.bim));
@@ -3683,7 +3947,7 @@ async function teamAnswer(val) {
   if (p.resp && p.resp['q' + i] && p.resp['q' + i][mk]) return;
   if (q.tipo === 'num' && isNaN(parseFloat(String(val).replace(',', '.')))) { toast('Escribe un número.'); return; }
   const v = q.tipo === 'mcq' ? +val : q.tipo === 'vf' ? val === 'true' : String(val), ok = evalAns(q, v);
-  const k = tkey(q.area, q.tema), st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; persist();
+  const k = tkey(q.area, q.tema), st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; compStat(me, q, ok); persist();
   s.sending = true;
   try { await Store.teamPatch(d.code, { ['partida.resp.q' + i + '.' + mk]: { ok, v } }); } catch (e) { console.error(e); toast('No se pudo enviar tu respuesta.'); }
   s.sending = false;
@@ -3739,7 +4003,7 @@ function renderTeamEnd(d) {
   if (mem && me.teamDone !== p.id) {
     giveFichas(4);
     const xp = 4 * mc + (good ? 20 : 5), coins = 3 + (good ? 5 : 0), rg = Math.floor(mc / 2) + (good ? 2 : 0);
-    me.xp += xp; me.coins += coins; me.res[p.area] = (me.res[p.area] || 0) + rg; me.teamDone = p.id; persist(true); updateHUD();
+    me.xp += xp; me.coins += coins; me.res[p.area] = (me.res[p.area] || 0) + rg; me.teamDone = p.id; recInc('equipos'); persist(true); updateHUD();
     s.reward = { id: p.id, xp, coins, rg };
   }
   const rw = s.reward && s.reward.id === p.id ? s.reward : null, lead = d.creador === me.id;
@@ -3755,6 +4019,7 @@ function renderTeamEnd(d) {
 async function tEquipos() {
   const box = $('#tBody'); box.innerHTML = '<p class="mute">Cargando…</p>';
   let list = []; try { list = await Store.teamsAll(); } catch (e) { box.innerHTML = '<p>No se pudo leer los equipos.</p>'; return; }
+  list = list.filter(t => TP.aulas === null || (t.miembros || []).some(m => aulaOk(m.g, m.s)));
   list.sort((a, b) => (b.creado || 0) - (a.creado || 0));
   box.innerHTML = `<p class="mute">Los equipos solo usan frases rápidas, así que no hay texto libre que moderar. Aquí puedes ver quién forma cada equipo y disolverlo si hace falta.</p>
     <div class="list">${list.map(t => `<div class="rcard"><div><p>${esc(t.nombre)} · <span class="mute">código ${esc(t.code)}</span></p>
@@ -4120,7 +4385,7 @@ async function tConectados() {
   if (T.tab !== 'conectados' || !$('#tBody')) return;
   const now = pnow(), rooms = {};
   Object.entries(tree).forEach(([room, shards]) => Object.values(shards || {}).forEach(sh => Object.values(sh || {}).forEach(v => {
-    if (v && v.n && now - (v.t || 0) < 45000) (rooms[room] = rooms[room] || []).push(v);
+    if (v && v.n && now - (v.t || 0) < 45000 && aulaOk(v.g, v.s)) (rooms[room] = rooms[room] || []).push(v);
   })));
   const keys = Object.keys(rooms).sort(), total = keys.reduce((a, k) => a + rooms[k].length, 0);
   const label = k => { const [b, ...r] = k.split('-'), id = r.join('-'), ar = areaById(id); return (ROMAN[+b] || b) + ' bimestre · ' + (id === 'plaza' ? '🏛️ Plaza' : ar ? ar.emoji + ' ' + ar.lugar + ' (' + ar.nombre + ')' : id); };
@@ -4353,7 +4618,7 @@ async function btAnswer(val) {
   if (b.resp && b.resp['q' + b.i] && b.resp['q' + b.i][mem.k]) return;
   if (q.tipo === 'num' && isNaN(parseFloat(String(val).replace(',', '.')))) { toast('Escribe un número.'); return; }
   const v = q.tipo === 'mcq' ? +val : q.tipo === 'vf' ? val === 'true' : String(val), ok = evalAns(q, v);
-  const k = tkey(q.area, q.tema), st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; persist();
+  const k = tkey(q.area, q.tema), st = me.stats[k] = me.stats[k] || { c: 0, t: 0 }; st.t++; if (ok) st.c++; compStat(me, q, ok); persist();
   bt.sending = true;
   try { await Store.dPatch('battles', b.id, { ['resp.q' + b.i + '.' + mem.k]: { ok, v } }); } catch (e) { console.error(e); toast('No se pudo enviar tu respuesta.'); }
   bt.sending = false;
