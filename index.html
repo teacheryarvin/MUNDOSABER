@@ -239,6 +239,7 @@ th{background:var(--soft);position:sticky;top:0}
     <button class="btn sm" data-act="ranking">Ranking</button>
     <button class="btn sm" data-act="mundos">Mundos</button>
     <button class="btn sm" data-act="equipo">Equipo</button>
+    <button class="btn sm coral" data-act="duelo">🥊 Duelo</button>
     <button class="btn sm mint" data-act="chat" id="btnChat" hidden>Chat<span id="chatBadge"></span></button>
     <button class="btn sm mint" data-act="ciudad">Mi ciudad</button>
     <button class="btn sm" data-act="clima" title="Cambiar hora y clima">🌤️ Clima</button>
@@ -1926,7 +1927,7 @@ function openPerfil() {
   }).join('');
   const badges = me.badges.map(k => { const [aid, ...rest] = k.split('|'), ar = areaById(aid); return `<span class="tag" style="font-size:14px">🏅 ${esc(rest.join('|'))}${ar ? ' · ' + esc(ar.nombre) : ''}</span>`; }).join('');
   openModal(`${mhead('⭐', 'Mi progreso')}<div class="mbody">
-    <div class="kpis"><div class="kpi"><b>${L}</b>${lvlTitle(L)}</div><div class="kpi"><b>${me.xp}</b>XP total</div><div class="kpi"><b>+${wxpOf(me)}</b>XP esta semana</div><div class="kpi"><b>${precOf(me)}%</b>de aciertos</div><div class="kpi"><b>${Object.keys(me.ok).length}</b>retos dominados</div><div class="kpi"><b>${Object.keys(me.bosses || {}).length}</b>jefes vencidos</div><div class="kpi"><b>${(me.arena && me.arena.best) || 0}</b>récord en la Arena</div><div class="kpi"><b>${me.bw || 0}</b>batallas ganadas</div></div>
+    <div class="kpis"><div class="kpi"><b>${L}</b>${lvlTitle(L)}</div><div class="kpi"><b>${me.xp}</b>XP total</div><div class="kpi"><b>+${wxpOf(me)}</b>XP esta semana</div><div class="kpi"><b>${precOf(me)}%</b>de aciertos</div><div class="kpi"><b>${Object.keys(me.ok).length}</b>retos dominados</div><div class="kpi"><b>${Object.keys(me.bosses || {}).length}</b>jefes vencidos</div><div class="kpi"><b>${(me.arena && me.arena.best) || 0}</b>récord en la Arena</div><div class="kpi"><b>${me.bw || 0}</b>batallas ganadas</div><div class="kpi"><b>${me.dw || 0}</b>duelos ganados</div></div>
     <div><div class="mute" style="margin-bottom:4px">Faltan ${a1 - me.xp} XP para el nivel ${L + 1}</div><div class="bar"><i style="width:${Math.round((me.xp - a0) / (a1 - a0) * 100)}%"></i></div></div>
     <div><h3 style="font-size:22px;margin-bottom:8px">Mis recursos · 🏙️ ${me.city.length} construcciones</h3>${AREAS.map(a => `<span class="tag" style="font-size:14px">${RES[a.id][0]} ${RES[a.id][1]}: ${me.res[a.id] || 0}</span>`).join('')}</div>
     <div><h3 style="font-size:22px;margin-bottom:8px">Avance por área</h3><div class="list">${rows || '<p class="mute">Aún no hay retos cargados para tu grado.</p>'}</div></div>
@@ -2315,6 +2316,10 @@ $('#modalCard').addEventListener('click', e => {
   switch (d.m) {
     case 'close': closeModal(); break;
     case 'again': startPractica(d.a, d.t); break;
+    case 'duCrear': dueloCrear(); break;
+    case 'duUnir': dueloJoin(d.id); break;
+    case 'duCodigo': dueloJoin($('#duCod').value); break;
+    case 'duRef': openDuelo(); break;
     case 'btCrear': btCrear(); break;
     case 'btBuscar': btBuscar(); break;
     case 'btUnir': btJoin(d.id); break;
@@ -2433,6 +2438,7 @@ $('#hudTools').addEventListener('click', e => {
   else if (b.dataset.act === 'plaza') exitArea();
   else if (b.dataset.act === 'mundos') openMundos();
   else if (b.dataset.act === 'equipo') openTeam();
+  else if (b.dataset.act === 'duelo') openDuelo();
   else if (b.dataset.act === 'chat') toggleChat();
   else if (b.dataset.act === 'ciudad') enterCity();
   else if (b.dataset.act === 'clima') envCycle();
@@ -4557,10 +4563,10 @@ function btStart(id) {
   bt.tmr = setInterval(btTick, 500);
 }
 function btStop() { const bt = S.battle; if (!bt) return; if (bt.unsub) bt.unsub(); clearInterval(bt.tmr); S.battle = null; }
-function btBack() { btStop(); if (S.team) { S.team.busy = false; renderTeam(); } else closeModal(); }
+function btBack() { const du = S.battle && S.battle.data && S.battle.data.duelo; btStop(); if (!du && S.team) { S.team.busy = false; renderTeam(); } else closeModal(); }
 async function btCancel() {
   const bt = S.battle; if (!bt || !bt.data) return; const b = bt.data;
-  try { await Store.dDelete('battles', b.id); await Store.teamPatch(b.A.code, { batalla: null }); } catch (e) { console.warn(e); }
+  try { await Store.dDelete('battles', b.id); if (!b.duelo) await Store.teamPatch(b.A.code, { batalla: null }); } catch (e) { console.warn(e); }
 }
 function btTick() {
   const bt = S.battle; if (!bt || !bt.data) return; const b = bt.data, me = S.me, side = btSide(b); if (!side) return;
@@ -4573,7 +4579,7 @@ function btTick() {
     if (b.host === me.id && bt.advKey !== b.i && (left <= 0 || (done && Date.now() - b.t0 > 1500))) { bt.advKey = b.i; setTimeout(() => { if (S.battle === bt) btAdvance(); }, done && left > 0 ? 1800 : 0); }
     const btn = $('#btSkip'); if (btn) btn.hidden = Date.now() - b.t0 < (BT_SECS + 15) * 1000;
   }
-  if (b.estado === 'fin' && !bt.cleared && b[side].lider === me.id) { bt.cleared = true; Store.teamPatch(b[side].code, { batalla: null }).catch(() => {}); }
+  if (b.estado === 'fin' && !bt.cleared && !b.duelo && b[side].lider === me.id) { bt.cleared = true; Store.teamPatch(b[side].code, { batalla: null }).catch(() => {}); }
 }
 async function btAdvance() {
   const bt = S.battle; if (!bt || !bt.data) return; const i = bt.data.i;
@@ -4629,19 +4635,19 @@ function renderBattle() {
   if (!b) { toast('La batalla se canceló.'); btBack(); return; }
   const me = S.me, side = btSide(b), a = areaById(b.area);
   if (!side) { btStop(); closeModal(); return; }
-  const foe = side === 'A' ? 'B' : 'A', mine = b[side], rival = b[foe];
-  const head = mhead('⚔️', 'Batalla · ' + a.nombre);
+  const foe = side === 'A' ? 'B' : 'A', mine = b[side], rival = b[foe], du = !!b.duelo;
+  const head = mhead(du ? '🥊' : '⚔️', (du ? 'Duelo · ' : 'Batalla · ') + a.nombre);
   if (b.estado === 'esperando') {
     const host = b.host === me.id;
-    openModal(`${head}<div class="mbody"><div class="big">⏳</div><h2 style="text-align:center;font-size:26px">Esperando a un equipo rival…</h2>
-      <div class="say" style="text-align:center">Código de la batalla: <b style="font-size:26px;letter-spacing:3px">${esc(b.id)}</b><br><span class="mute">Pásalo al líder de otro equipo, o espera a que te encuentren en «Buscar rival».</span></div>
+    openModal(`${head}<div class="mbody"><div class="big">⏳</div><h2 style="text-align:center;font-size:26px">${du ? 'Esperando a un rival…' : 'Esperando a un equipo rival…'}</h2>
+      <div class="say" style="text-align:center">Código de la batalla: <b style="font-size:26px;letter-spacing:3px">${esc(b.id)}</b><br><span class="mute">${du ? 'Pásalo a un compañero de tu grado, o espera a que te encuentren en «🥊 Duelo».' : 'Pásalo al líder de otro equipo, o espera a que te encuentren en «Buscar rival».'}</span></div>
       <div class="list">${mine.miembros.map(m => `<div class="rk" style="grid-template-columns:1fr"><span>${esc(m.n)}</span></div>`).join('')}</div>
       ${host ? '<button class="btn coral" data-m="btCancel">Cancelar batalla</button>' : '<div class="mute">El líder puede cancelar la batalla.</div>'}</div>`, { color: '#ffd6d6' });
     return;
   }
   if (b.estado === 'listo') {
-    openModal(`${head}<div class="mbody"><div class="vs"><div class="say" style="text-align:center"><b>${esc(b.A.nombre)}</b><br>${b.A.miembros.length} integrantes</div><div class="big">⚔️</div><div class="say" style="text-align:center"><b>${esc(b.B.nombre)}</b><br>${b.B.miembros.length} integrantes</div></div>
-      <h2 style="text-align:center;font-size:26px">¡Prepárense! La batalla empieza en unos segundos…</h2>${b.v === 2 ? '<div class="say" style="text-align:center">🔥 Nivel 1 Calentamiento · ⚔️ Nivel 2 Combate (daño x1.5) · 💀 Nivel 3 ¡Jefe final! (daño x2)<br>Cada equipo tiene 3 poderes: ⚡ Doble daño, 🛡️ Escudo y 💚 Curar. ¡Úsenlos con estrategia!</div>' : ''}</div>`, { color: '#ffd6d6' });
+    openModal(`${head}<div class="mbody"><div class="vs"><div class="say" style="text-align:center"><b>${esc(b.A.nombre)}</b><br>${du ? 'Jugador' : b.A.miembros.length + ' integrantes'}</div><div class="big">⚔️</div><div class="say" style="text-align:center"><b>${esc(b.B.nombre)}</b><br>${du ? 'Jugador' : b.B.miembros.length + ' integrantes'}</div></div>
+      <h2 style="text-align:center;font-size:26px">${du ? '¡Prepárate! El duelo empieza en unos segundos…' : '¡Prepárense! La batalla empieza en unos segundos…'}</h2>${b.v === 2 ? '<div class="say" style="text-align:center">🔥 Nivel 1 Calentamiento · ⚔️ Nivel 2 Combate (daño x1.5) · 💀 Nivel 3 ¡Jefe final! (daño x2)<br>Cada ' + (du ? 'jugador tiene' : 'equipo tiene') + ' 3 poderes: ⚡ Doble daño, 🛡️ Escudo y 💚 Curar. ¡Úsenlos con estrategia!</div>' : ''}</div>`, { color: '#ffd6d6' });
     return;
   }
   const prev = bt.lastHp, hitMine = prev && mine.hp < prev[side], hitFoe = prev && rival.hp < prev[foe];
@@ -4654,18 +4660,18 @@ function renderBattle() {
     const lvBanner = lv ? `<div class="lvl lv${li}">${lv.e} Nivel ${li + 1}: ${lv.n}${lv.m > 1 ? ' · daño x' + lv.m : ''}${cbn >= 2 ? ' · 🔥 Racha x' + cbn : ''}</div>` : '';
     const pwBar = lv ? `<div class="pws">${Object.entries(BT_PW).map(([k, [e, n]]) => `<button class="btn sm ${curPw[side] === k ? 'mint' : 'alt'}" data-m="btPow" data-v="${k}" ${mu[k] || curPw[side] ? 'disabled' : ''}>${e} ${n}${mu[k] ? ' (usado)' : ''}</button>`).join('')}${curPw[foe] ? `<span class="tag">Rival: ${BT_PW[curPw[foe]][0]} ${BT_PW[curPw[foe]][1]}</span>` : ''}</div>` : '';
     const pr = b.i > 0 && b.rondas && b.rondas['q' + (b.i - 1)];
-    const banner = pr ? `<div class="say" style="text-align:center;font-weight:800">Ronda ${b.i}: tu equipo hizo <span style="color:var(--ok)">−${side === 'A' ? pr.b : pr.a}</span> de daño · el rival hizo <span style="color:var(--bad)">−${side === 'A' ? pr.a : pr.b}</span>${pr.pa || pr.pb ? ' · ' + [pr.pa && 'Equipo A ' + BT_PW[pr.pa][0], pr.pb && 'Equipo B ' + BT_PW[pr.pb][0]].filter(Boolean).join(' · ') : ''}</div>` : '';
+    const banner = pr ? `<div class="say" style="text-align:center;font-weight:800">Ronda ${b.i}: ${du ? 'tú hiciste' : 'tu equipo hizo'} <span style="color:var(--ok)">−${side === 'A' ? pr.b : pr.a}</span> de daño · el rival hizo <span style="color:var(--bad)">−${side === 'A' ? pr.a : pr.b}</span>${pr.pa || pr.pb ? ' · ' + [pr.pa && 'Equipo A ' + BT_PW[pr.pa][0], pr.pb && 'Equipo B ' + BT_PW[pr.pb][0]].filter(Boolean).join(' · ') : ''}</div>` : '';
     let body = '';
     if (q.tipo === 'mcq') body = `<div class="opts">${q.opciones.map((o, idx) => `<button class="opt ${mineA ? (idx === q.correcta ? 'ok' : (mineA.v === idx ? 'bad' : '')) : ''}" data-m="btAns" data-v="${idx}" ${mineA ? 'disabled' : ''}>${esc(o)}</button>`).join('')}</div>`;
     else if (q.tipo === 'vf') body = `<div class="opts">${[['true', '✔ Verdadero'], ['false', '✘ Falso']].map(([v, t]) => `<button class="opt ${mineA ? (((v === 'true') === q.correcta) ? 'ok' : ((mineA.v === (v === 'true')) ? 'bad' : '')) : ''}" data-m="btAns" data-v="${v}" ${mineA ? 'disabled' : ''}>${t}</button>`).join('')}</div>`;
     else if (!mineA) body = `<div class="row"><input id="btNum" inputmode="decimal" autocomplete="off" placeholder="Escribe tu respuesta"><button class="btn" data-m="btNumOk" style="flex:0 0 auto">Responder</button></div>`;
     else body = `<div class="say">Tu respuesta: <b>${esc(String(mineA.v))}</b></div>`;
-    const after = mineA ? `<div class="fb ${mineA.ok ? 'ok' : 'bad'}"><h3>${mineA.ok ? '¡Golpe certero! 💥' : 'Fallaste'}</h3>${mineA.ok ? '' : `<div>La respuesta correcta es <b>${esc(correctText(q))}</b>.</div>`}<div style="margin-top:6px">${esc(q.explicacion)}</div></div><div class="mute" style="font-weight:800">Esperando al resto de los equipos…</div>` : '';
+    const after = mineA ? `<div class="fb ${mineA.ok ? 'ok' : 'bad'}"><h3>${mineA.ok ? '¡Golpe certero! 💥' : 'Fallaste'}</h3>${mineA.ok ? '' : `<div>La respuesta correcta es <b>${esc(correctText(q))}</b>.</div>`}<div style="margin-top:6px">${esc(q.explicacion)}</div></div><div class="mute" style="font-weight:800">${du ? 'Esperando a tu rival…' : 'Esperando al resto de los equipos…'}</div>` : '';
     openModal(`${head}<div class="mbody">
-      <div class="vs">${hpBar(mine, 'Tu equipo', hitMine, b.hpMax || BT_HP)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', hitFoe, b.hpMax || BT_HP)}</div>
+      <div class="vs">${hpBar(mine, du ? 'Tú' : 'Tu equipo', hitMine, b.hpMax || BT_HP)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', hitFoe, b.hpMax || BT_HP)}</div>
       <div class="qhead"><span class="mute">Pregunta ${b.i + 1} de ${b.pregs.length}</span><b>⏱️ <span id="btTmr">${Math.max(0, BT_SECS - Math.floor((Date.now() - b.t0) / 1000))}</span> s</b></div>
       ${lvBanner}${pwBar}${banner}<div class="enun">${esc(q.enunciado)}</div>${body}${after}
-      <div><span class="mute">Tu equipo:</span> ${myDone} <span class="mute">· Rival: ${foeDone} de ${rival.miembros.length} respondieron</span></div>
+      ${du ? `<div class="mute" style="font-weight:800">${foeDone ? 'Tu rival ya respondió ✅' : 'Tu rival está pensando…'}</div>` : `<div><span class="mute">Tu equipo:</span> ${myDone} <span class="mute">· Rival: ${foeDone} de ${rival.miembros.length} respondieron</span></div>`}
       <button class="btn sm alt" id="btSkip" data-m="btNext" hidden>El rival se demora: avanzar</button></div>`, { color: lv ? lv.c : '#ffd6d6' });
     if (!mineA && q.tipo === 'num') { const inp = $('#btNum'); if (inp) inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); btAnswer(inp.value); } }); }
     return;
@@ -4673,26 +4679,88 @@ function renderBattle() {
   const win = b.ganador === side, tie = b.ganador === 'E';
   if (!bt.reward) bt.reward = btReward(b);
   const rw = bt.reward, per = mine.miembros.map(m => { let c = 0; for (let j = 0; j < b.pregs.length; j++) { const r = b.resp && b.resp['q' + j] && b.resp['q' + j][m.k]; if (r && r.ok) c++; } return { m, c }; });
-  openModal(`${head}<div class="mbody"><div class="big">${win ? '🏆' : tie ? '🤝' : '💪'}</div><h2 style="text-align:center;font-size:28px">${win ? '¡Ganó tu equipo!' : tie ? '¡Empate!' : 'Esta vez ganó el rival'}</h2>
-    <div class="vs">${hpBar(mine, 'Tu equipo', false, b.hpMax || BT_HP)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', false, b.hpMax || BT_HP)}</div>
+  openModal(`${head}<div class="mbody"><div class="big">${win ? '🏆' : tie ? '🤝' : '💪'}</div><h2 style="text-align:center;font-size:28px">${win ? (du ? '¡Ganaste el duelo!' : '¡Ganó tu equipo!') : tie ? '¡Empate!' : 'Esta vez ganó el rival'}</h2>
+    <div class="vs">${hpBar(mine, du ? 'Tú' : 'Tu equipo', false, b.hpMax || BT_HP)}<div class="big" style="font-size:30px">⚔️</div>${hpBar(rival, 'Rival', false, b.hpMax || BT_HP)}</div>
     <div class="kpis">${rw ? `<div class="kpi"><b>+${rw.xp}</b>XP para ti</div><div class="kpi"><b>+${rw.coins}</b>🪙</div><div class="kpi"><b>+${rw.rg} ${RES[b.area][0]}</b>${RES[b.area][1]}</div><div class="kpi"><b>+${rw.fich}</b>💬 fichas</div>` : '<div class="kpi"><b>✔</b>recompensa recibida</div>'}</div>
     <div class="list">${per.map(x => `<div class="rk" style="grid-template-columns:1fr auto"><span>${esc(x.m.n)}</span><span>${x.c} de ${b.pregs.length} aciertos</span></div>`).join('')}</div>
     <div class="say">${win ? 'Las victorias cuentan en tu perfil: ¡sigan practicando para la próxima batalla!' : 'Repasen los temas y pidan la revancha. ¡Cada batalla enseña algo!'}</div>
-    <button class="btn mint" data-m="btBack">Volver al equipo</button></div>`, { color: '#ffd6d6' });
+    ${rw && rw.cap ? '<div class="say">Ya llegaste al límite de recompensas por duelos de hoy. ¡Puedes seguir duelando por diversión!</div>' : ''}<button class="btn mint" data-m="btBack">${du ? 'Salir' : 'Volver al equipo'}</button></div>`, { color: '#ffd6d6' });
 }
 function btReward(b) {
   const me = S.me, side = btSide(b); if (!side || me.battleDone === b.id) return null;
   const mm = btMe(b, side), win = b.ganador === side, tie = b.ganador === 'E'; let corr = 0;
   for (let j = 0; j < b.pregs.length; j++) { const r = b.resp && b.resp['q' + j] && b.resp['q' + j][mm.k]; if (r && r.ok) corr++; }
-  const xp = (win ? 40 : tie ? 25 : 15) + 3 * corr, coins = win ? 15 : tie ? 8 : 5, rg = Math.floor(corr / 2) + (win ? 3 : 0), fich = win ? 6 : 2;
-  me.xp += xp; me.coins += coins; me.res[b.area] = (me.res[b.area] || 0) + rg; if (win) me.bw = (me.bw || 0) + 1; me.battleDone = b.id;
+  let xp = (win ? 40 : tie ? 25 : 15) + 3 * corr, coins = win ? 15 : tie ? 8 : 5, rg = Math.floor(corr / 2) + (win ? 3 : 0), fich = win ? 6 : 2, cap = false;
+  if (b.duelo) {   // duelos 1 contra 1: recompensa menor y con tope diario para que no se «fabriquen» puntos entre amigos
+    const dd = ymd(); me.duD = me.duD && me.duD.d === dd ? me.duD : { d: dd, n: 0 };
+    if (me.duD.n >= 6) { cap = true; xp = 0; coins = 0; rg = 0; fich = 0; }
+    else { me.duD.n++; xp = (win ? 25 : tie ? 15 : 10) + 2 * corr; coins = win ? 8 : 4; rg = Math.floor(corr / 3) + (win ? 1 : 0); fich = win ? 3 : 1; }
+    if (win) me.dw = (me.dw || 0) + 1; me.dp = (me.dp || 0) + 1;
+  } else if (win) me.bw = (me.bw || 0) + 1;
+  me.xp += xp; me.coins += coins; me.res[b.area] = (me.res[b.area] || 0) + rg; me.battleDone = b.id;
   giveFichas(fich); persist(true); updateHUD();
-  return { xp, coins, rg, fich };
+  return { xp, coins, rg, fich, cap };
+}
+
+/* =====================================================================
+   DUELOS 1 CONTRA 1
+   Reutilizan el motor de batalla: cada lado es un «equipo» de un solo
+   jugador. Se puede retar a alguien de la misma sección o de otra, pero
+   del mismo grado (las preguntas son del grado de quien crea el duelo).
+   ===================================================================== */
+const btInfoSolo = (me, hp, k) => ({ cb: 0, used: {}, code: '', nombre: shortName(me) + ' · ' + me.grado + '° ' + me.seccion, lider: me.id, hp, miembros: [{ id: me.id, k, n: shortName(me), g: me.grado, s: me.seccion, c: me.avatar.shirt }] });
+Object.assign(Store, {
+  async dOpenDuelos() {
+    if (this.mode === 'online') { const snap = await this.db.collection('battles').where('estado', '==', 'esperando').where('duelo', '==', true).limit(30).get(); return snap.docs.map(d => d.data()); }
+    return Object.values(this._dk('battles')).filter(b => b.estado === 'esperando' && b.duelo);
+  }
+});
+async function openDuelo() {
+  const me = S.me; if (!me) return;
+  openModal(`${mhead('🥊', 'Duelo 1 contra 1')}<div class="mbody"><p class="mute">Cargando…</p></div>`, { color: '#ffd6d6' });
+  let list = []; try { list = await Store.dOpenDuelos(); } catch (e) { console.warn(e); }
+  const now = Date.now();
+  list = list.filter(b => b.estado === 'esperando' && !b.B && b.host !== me.id && b.grado === me.grado && now - (b.creado || 0) < 1800000)
+    .sort((a, b) => (b.A.miembros[0].s === me.seccion) - (a.A.miembros[0].s === me.seccion));
+  if (!$('#modalCard') || !$('#modalCard').textContent.includes('Duelo 1 contra 1')) return;
+  openModal(`${mhead('🥊', 'Duelo 1 contra 1')}<div class="mbody">
+    <div class="say">Reta a un compañero de tu grado, de tu sección o de otra. 10 preguntas en 3 niveles (calentamiento, combate y jefe final), con poderes ⚡ 🛡️ 💚. Los duelos dan menos XP que las batallas de equipo y hay un tope de 6 por día.</div>
+    <div class="row" style="align-items:end"><div><label for="duArea">Área del duelo</label><select id="duArea">${AREAS.map(a => `<option value="${a.id}">${a.emoji} ${esc(a.nombre)}</option>`).join('')}</select></div><button class="btn coral" data-m="duCrear" style="flex:0 0 auto">Crear duelo</button></div>
+    <h3 style="font-size:20px">Rivales esperando (${list.length})</h3>
+    <div class="list">${list.map(b => { const a = areaById(b.area), r = b.A.miembros[0], mism = r.s === me.seccion; return `<div class="rcard"><div><p>${esc(r.n)} <span class="mute">· ${r.g}° ${esc(r.s)}</span></p><span class="tag">${a.emoji} ${esc(a.nombre)}</span><span class="tag">${mism ? '👥 Tu sección' : '🔀 Otra sección'}</span></div><div><button class="btn sm coral" data-m="duUnir" data-id="${esc(b.id)}">¡Retar!</button></div></div>`; }).join('') || '<p class="mute">Nadie está esperando ahora. Crea tu duelo y comparte el código con un compañero.</p>'}</div>
+    <div class="row" style="align-items:end"><div><label for="duCod">¿Tienes un código?</label><input id="duCod" maxlength="6" autocomplete="off" placeholder="Ej. K7QX2" style="text-transform:uppercase"></div><button class="btn" data-m="duCodigo" style="flex:0 0 auto">Entrar</button></div>
+    <div class="row"><button class="btn sm alt" data-m="duRef">Actualizar lista</button><button class="btn sm alt" data-m="close">Cerrar</button></div></div>`, { color: '#ffd6d6' });
+}
+async function dueloCrear() {
+  const me = S.me, area = ($('#duArea') || {}).value || 'mat';
+  const qs = buildTeamQs(area, 10); if (!qs) { toast('No hay retos de esta área para tu grado y bimestre.'); return; }
+  qs.sort((a, b) => (a.dificultad || 1) - (b.dificultad || 1)); const nq = qs.length, niv = [0, Math.round(nq / 3), Math.round(2 * nq / 3)], hpMax = nq * 20;
+  let id, tries = 0;
+  try {
+    do { id = genCode(); tries++; } while (tries < 6 && await Store.dGet('battles', id));
+    await Store.dSet('battles', id, { id, area, estado: 'esperando', creado: Date.now(), host: me.id, grado: me.grado, seccion: me.seccion, duelo: true, v: 2, hpMax, niv, pw: {}, A: btInfoSolo(me, hpMax, 'm1'), B: null, pregs: qs, i: 0, t0: 0, resp: {}, rondas: {}, ganador: null });
+  } catch (e) { console.error(e); toast('No se pudo crear el duelo. Revisa tu conexión.'); return; }
+  btStart(id);
+}
+async function dueloJoin(id) {
+  const me = S.me; id = String(id || '').trim().toUpperCase(); if (id.length < 4) { toast('Escribe el código del duelo.'); return; }
+  let r;
+  try {
+    r = await Store.dMut('battles', id, b => {
+      if (!b.duelo) return { error: 'Ese código es de una batalla de equipos.' };
+      if (b.estado !== 'esperando' || b.B) return { error: 'Ese duelo ya no está disponible.' };
+      if (b.host === me.id) return { error: 'No puedes retarte a ti mismo.' };
+      if (b.grado !== me.grado) return { error: 'Solo puedes hacer duelos con estudiantes de tu mismo grado.' };
+      b.B = btInfoSolo(me, b.hpMax || BT_HP, 'm2'); b.estado = 'listo';
+    });
+    if (r.error) { toast(r.error === 'No existe.' ? 'No existe un duelo con ese código.' : r.error); return; }
+  } catch (e) { console.error(e); toast('No se pudo entrar al duelo.'); return; }
+  btStart(id);
 }
 async function tBatallasInfo(box) {
   let list = []; try { list = await Store.dAll('battles'); } catch (e) { return; }
   const fin = list.filter(b => b.estado === 'fin').length, act = list.filter(b => b.estado === 'jugando').length, esp = list.filter(b => b.estado === 'esperando' || b.estado === 'listo').length;
-  box.insertAdjacentHTML('beforeend', `<div class="panel" style="padding:14px;display:grid;gap:8px;margin-top:14px"><h3 style="font-size:20px">Batallas entre equipos</h3><p class="mute" style="margin:0">${act} en juego · ${esp} esperando rival · ${fin} terminadas.</p><div><button class="btn sm coral" data-m="btClean">Borrar batallas terminadas y antiguas</button></div></div>`);
+  box.insertAdjacentHTML('beforeend', `<div class="panel" style="padding:14px;display:grid;gap:8px;margin-top:14px"><h3 style="font-size:20px">Batallas de equipos y duelos</h3><p class="mute" style="margin:0">${act} en juego · ${esp} esperando rival · ${fin} terminadas.</p><div><button class="btn sm coral" data-m="btClean">Borrar batallas terminadas y antiguas</button></div></div>`);
 }
 
 /* =====================================================================
