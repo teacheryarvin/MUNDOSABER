@@ -606,8 +606,22 @@ const Store = {
   async saveStudent(s) {
     s.updated = Date.now();
     ensureWeek(s); s.wxp = wxpOf(s); s.wk_k = s.wk.k;
-    if (this.mode === 'online') return this.db.collection('students').doc(s.id).set(s);
+    if (this.mode === 'online') {
+      if (S.me && s.id === S.me.id) {
+        try {
+          const d = await this.db.collection('students').doc(s.id).get(), r = d.exists ? d.data() : null;
+          if (r && (r.resetAt || 0) > (s.resetAt || 0)) { Object.keys(s).forEach(k => delete s[k]); Object.assign(s, r); updateHUD(); toast('Tu docente reinició tu progreso. Se cargó tu cuenta actualizada.'); return; }
+        } catch (e) { console.warn(e); }
+      }
+      return this.db.collection('students').doc(s.id).set(s);
+    }
     const all = this._get('ms_students', {}); all[s.id] = s; this._set('ms_students', all);
+  },
+  async resetStudents(list) {
+    if (this.mode === 'online') {
+      for (let i = 0; i < list.length; i += 400) { const b = this.db.batch(); list.slice(i, i + 400).forEach(x => b.set(this.db.collection('students').doc(x.id), x)); await b.commit(); }
+    } else { const all = this._get('ms_students', {}); list.forEach(x => { all[x.id] = x; }); this._set('ms_students', all); }
+    this._allc = null; this._rk = {};
   },
   async deleteStudent(id) {
     if (this.mode === 'online') await this.db.collection('students').doc(id).delete();
@@ -2200,6 +2214,7 @@ async function tProgreso() {
       <div><label for="pgSel">Grado</label><select id="pgSel"><option value="">Todos</option>${gradosPerm().map(g => `<option value="${g}" ${String(T.pg) === String(g) ? 'selected' : ''}>${g}°</option>`).join('')}</select></div>
       <div><label for="psSel">Sección</label><select id="psSel"><option value="">Todas</option>${seccsPerm().map(s => `<option ${T.ps === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
       <div style="flex:0 0 auto"><button class="btn sm" data-m="tcsv">Descargar CSV</button></div>
+      <div style="flex:0 0 auto"><button class="btn sm coral" data-m="trsAll" ${list.length ? '' : 'disabled'}>↺ Reiniciar ranking y progreso…</button></div>
     </div>
     <div class="kpis" style="margin-bottom:12px"><div class="kpi"><b>${list.length}</b>estudiantes</div><div class="kpi"><b>${list.length ? Math.round(list.reduce((a, s) => a + precOf(s), 0) / list.length) : 0}%</b>aciertos promedio</div><div class="kpi"><b>${list.reduce((a, s) => a + Object.keys(s.ok || {}).length, 0)}</b>retos dominados</div></div>
     <h3 style="font-size:20px;margin-bottom:6px">Evaluación de entrada y de salida</h3>
@@ -2209,7 +2224,7 @@ async function tProgreso() {
     <h3 style="font-size:20px;margin-bottom:6px">Temas que más cuestan</h3>
     ${weak ? `<ul style="margin:0 0 14px;padding-left:20px;font-weight:700">${weak}</ul>` : '<p class="mute">Aún no hay suficientes respuestas para detectar temas difíciles.</p>'}
     <div class="tbl"><table><thead><tr><th>Estudiante</th><th>Gr./Sec.</th><th>Nivel</th><th>XP</th><th>Retos dominados</th><th>Aciertos</th><th>Entrada</th><th>Salida</th><th>Esfuerzo</th><th>Insignias</th><th></th></tr></thead><tbody>
-    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${evAvg(s, 'entrada') === null ? '—' : evAvg(s, 'entrada') + '%'}</td><td>${evAvg(s, 'salida') === null ? '—' : evAvg(s, 'salida') + '%'}</td><td title="Mejor racha de semanas · apoyos en equipo · temas superados">🔥${recVal(s.rec || {}, 'sem')} 🤝${(s.rec || {}).apoyo || 0} 💪${(s.rec || {}).mejoras || 0}</td><td>${(s.badges || []).length}</td><td><button class="btn sm alt" data-m="tpin" data-id="${esc(s.id)}" aria-label="Reiniciar el PIN de ${esc(s.nombres)} ${esc(s.apellidos)}">🔑 PIN</button> <button class="btn sm coral" data-m="tdelst" data-id="${esc(s.id)}" aria-label="Eliminar a ${esc(s.nombres)} ${esc(s.apellidos)}">🗑️ Eliminar</button></td></tr>`).join('') || '<tr><td colspan="11" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
+    ${list.map(s => `<tr><td>${esc(s.apellidos)}, ${esc(s.nombres)}</td><td>${s.grado}° ${esc(s.seccion)}</td><td>${levelOf(s.xp)}</td><td>${s.xp}</td><td>${Object.keys(s.ok || {}).length}</td><td>${precOf(s)}%</td><td>${evAvg(s, 'entrada') === null ? '—' : evAvg(s, 'entrada') + '%'}</td><td>${evAvg(s, 'salida') === null ? '—' : evAvg(s, 'salida') + '%'}</td><td title="Mejor racha de semanas · apoyos en equipo · temas superados">🔥${recVal(s.rec || {}, 'sem')} 🤝${(s.rec || {}).apoyo || 0} 💪${(s.rec || {}).mejoras || 0}</td><td>${(s.badges || []).length}</td><td><button class="btn sm alt" data-m="tpin" data-id="${esc(s.id)}" aria-label="Reiniciar el PIN de ${esc(s.nombres)} ${esc(s.apellidos)}">🔑 PIN</button> <button class="btn sm alt" data-m="trsOne" data-id="${esc(s.id)}" aria-label="Reiniciar el progreso de ${esc(s.nombres)} ${esc(s.apellidos)}">↺ Reiniciar</button> <button class="btn sm coral" data-m="tdelst" data-id="${esc(s.id)}" aria-label="Eliminar a ${esc(s.nombres)} ${esc(s.apellidos)}">🗑️ Eliminar</button></td></tr>`).join('') || '<tr><td colspan="11" class="mute">Aún no hay estudiantes registrados.</td></tr>'}
     </tbody></table></div>`;
 }
 /* ---------- administrador: docentes ---------- */
@@ -2272,6 +2287,51 @@ async function tResetPin(id) {
   if (!confirm('¿Reiniciar el PIN de ' + st.apellidos + ', ' + st.nombres + '?\n\nEl estudiante creará un PIN nuevo la próxima vez que entre.')) return;
   try { delete st.pinHash; await Store.saveStudent(st); Store._allc = null; toast('PIN reiniciado.'); tProgreso(); }
   catch (e) { console.error(e); toast('No se pudo reiniciar el PIN.'); }
+}
+/* ---------- reiniciar ranking y progreso ---------- */
+const RS_OPTS = [
+  ['xp', 'Ranking y nivel', 'XP total y XP de la semana: todos vuelven al nivel 1.', true],
+  ['prog', 'Progreso de aprendizaje', 'Retos y temas dominados, jefes, lecciones, estadísticas y logro por competencia.', true],
+  ['logros', 'Insignias, misiones y esfuerzo', 'Insignias, misiones de construcción, historias, rachas y reconocimientos.', true],
+  ['evals', 'Evaluaciones de entrada y de salida', 'Podrán rendirse otra vez.', false],
+  ['eco', 'Monedas, recursos y fichas', 'Vuelven a 30 monedas, sin recursos ni fichas.', false],
+  ['ciudad', 'Mi ciudad, compras y avatar', 'Se borra la ciudad y los objetos comprados; el avatar vuelve al inicial.', false]
+];
+function resetFields(st, sel) {
+  const o = JSON.parse(JSON.stringify(st));
+  if (sel.xp) { o.xp = 0; o.wk = { k: weekKey(), base: 0 }; o.wxp = 0; o.wk_k = weekKey(); }
+  if (sel.prog) { o.ok = {}; o.temas = {}; o.bosses = {}; o.lessons = {}; o.stats = {}; o.comp = {}; }
+  if (sel.logros) { o.badges = []; o.mis = []; o.hist = {}; o.rec = {}; }
+  if (sel.evals) o.evals = {};
+  if (sel.eco) { o.coins = 30; o.res = {}; o.fichas = 0; }
+  if (sel.ciudad) { o.city = []; o.owned = []; o.avatar = defaultAvatar(); }
+  o.resetAt = Date.now(); o.updated = Date.now(); return o;
+}
+function tResetView(ids, label) {
+  T.rs = { ids, label }; const n = (T.list || []).filter(x => ids.includes(x.id)).length;
+  $('#tBody').innerHTML = `<div class="say" style="background:#fff3cd"><b>⚠️ Vas a reiniciar a ${n} estudiante${n === 1 ? '' : 's'}:</b> ${esc(label)}.<br>Esta acción <b>no se puede deshacer</b>. Antes se descargará automáticamente un respaldo (archivo JSON) con sus datos actuales: guárdalo en un lugar seguro.</div>
+    <div class="list" style="margin:10px 0">${RS_OPTS.map(([k, t, d, on]) => `<label class="rcard" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" class="rsOpt" value="${k}" ${on ? 'checked' : ''} style="width:22px;height:22px;flex:none;margin-top:2px"><div><b>${t}</b><div class="mute">${d}</div></div></label>`).join('')}</div>
+    <p class="mute">No se modifican: nombres, grado, sección, PIN ni los equipos.</p>
+    <label for="rsConf">Para confirmar, escribe <b>REINICIAR</b></label><input id="rsConf" autocomplete="off" placeholder="REINICIAR">
+    <div class="row" style="margin-top:10px"><button class="btn alt" data-m="rsCancel">Cancelar</button><button class="btn coral" id="rsGo" data-m="rsGo" disabled>Reiniciar ahora</button></div>`;
+  $('#rsConf').addEventListener('input', e => { $('#rsGo').disabled = e.target.value.trim().toUpperCase() !== 'REINICIAR'; });
+}
+function tResetAll() {
+  const list = T.list || []; if (!list.length) return;
+  tResetView(list.map(x => x.id), list.length + ' estudiantes (' + (T.pg ? T.pg + '°' : 'todos los grados') + (T.ps ? ' ' + T.ps : ', todas las secciones') + ')');
+}
+function tResetOne(id) { const st = (T.list || []).find(x => x.id === id); if (st) tResetView([id], st.apellidos + ', ' + st.nombres + ' (' + st.grado + '° ' + st.seccion + ')'); }
+async function tResetRun() {
+  const rs = T.rs; if (!rs) return; const sel = {}; $$('.rsOpt').forEach(c => { sel[c.value] = c.checked; });
+  if (!Object.values(sel).some(Boolean)) return toast('Elige qué quieres reiniciar.');
+  if ($('#rsConf').value.trim().toUpperCase() !== 'REINICIAR') return;
+  const list = (T.list || []).filter(x => rs.ids.includes(x.id) && aulaOk(x.grado, x.seccion)); if (!list.length) return;
+  download('respaldo-antes-de-reiniciar-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(list, null, 1), 'application/json');
+  try {
+    const out = list.map(x => resetFields(x, sel)); await Store.resetStudents(out);
+    const mine = S.me && out.find(o => o.id === S.me.id); if (mine) { Object.assign(S.me, mine); updateHUD(); }
+    toast('Listo: se reinició a ' + out.length + ' estudiante' + (out.length === 1 ? '' : 's') + '.'); T.rs = null; tProgreso();
+  } catch (e) { console.error(e); toast('No se pudo reiniciar. Revisa tu conexión y vuelve a intentarlo.'); }
 }
 async function tDeleteStudent(id) {
   const st = (T.list || []).find(x => x.id === id); if (!st) return;
@@ -2398,6 +2458,10 @@ $('#modalCard').addEventListener('click', e => {
     case 'tdAll': { const cs = $$('.dAula'), on = cs.some(c => !c.checked); cs.forEach(c => { c.checked = on; }); break; }
     case 'tdEdit': case 'tdAct': case 'tdMail': case 'tdDel': tdAction(d.m, d.id); break;
     case 'tdelst': tDeleteStudent(d.id); break;
+    case 'trsAll': tResetAll(); break;
+    case 'trsOne': tResetOne(d.id); break;
+    case 'rsCancel': tProgreso(); break;
+    case 'rsGo': tResetRun(); break;
     case 'tpin': tResetPin(d.id); break;
     case 'tnew': renderRetoForm(null); break;
     case 'tedit': renderRetoForm(S.retos.find(r => r.id === d.id)); break;
