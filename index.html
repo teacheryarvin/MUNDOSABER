@@ -633,10 +633,25 @@ const Store = {
   },
   unwatchMe() { if (this._w) { try { this._w(); } catch (e) { /* nada */ } this._w = null; } },
   async resetStudents(list) {
+    const res = { ok: [], fail: [] };
     if (this.mode === 'online') {
-      for (let i = 0; i < list.length; i += 400) { const b = this.db.batch(); list.slice(i, i + 400).forEach(x => b.set(this.db.collection('students').doc(x.id), x)); await b.commit(); }
-    } else { const all = this._get('ms_students', {}); list.forEach(x => { all[x.id] = x; }); this._set('ms_students', all); }
+      for (let i = 0; i < list.length; i += 20) {
+        const part = list.slice(i, i + 20);
+        const r = await Promise.allSettled(part.map(x => this.db.collection('students').doc(x.id).set(x)));
+        r.forEach((q, k) => { if (q.status === 'fulfilled') res.ok.push(part[k].id); else res.fail.push({ id: part[k].id, err: (q.reason && (q.reason.code || q.reason.message)) || 'error' }); });
+      }
+    } else { const all = this._get('ms_students', {}); list.forEach(x => { all[x.id] = x; res.ok.push(x.id); }); this._set('ms_students', all); }
     this._allc = null; this._rk = {};
+    return res;
+  },
+  async verifyReset(list) {
+    if (this.mode !== 'online') return [];
+    const bad = [];
+    await Promise.all(list.map(async x => {
+      try { const d = await this.db.collection('students').doc(x.id).get({ source: 'server' }), r = d.exists ? d.data() : null; if (!r || (r.resetAt || 0) !== x.resetAt) bad.push(x.id); }
+      catch (e) { console.warn(e); }
+    }));
+    return bad;
   },
   async deleteStudent(id) {
     if (this.mode === 'online') await this.db.collection('students').doc(id).delete();
@@ -2343,11 +2358,30 @@ async function tResetRun() {
   if ($('#rsConf').value.trim().toUpperCase() !== 'REINICIAR') return;
   const list = (T.list || []).filter(x => rs.ids.includes(x.id) && aulaOk(x.grado, x.seccion)); if (!list.length) return;
   download('respaldo-antes-de-reiniciar-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(list, null, 1), 'application/json');
+  $('#tBody').innerHTML = '<p class="mute">Reiniciando a ' + list.length + ' estudiante(s)…</p>';
   try {
-    const out = list.map(x => resetFields(x, sel)); await Store.resetStudents(out);
-    const mine = S.me && out.find(o => o.id === S.me.id); if (mine) { Object.assign(S.me, mine); updateHUD(); }
-    toast('Listo: se reinició a ' + out.length + ' estudiante' + (out.length === 1 ? '' : 's') + '.'); T.rs = null; tProgreso();
-  } catch (e) { console.error(e); toast('No se pudo reiniciar. Revisa tu conexión y vuelve a intentarlo.'); }
+    const out = list.map(x => resetFields(x, sel)), res = await Store.resetStudents(out), done = out.filter(o => res.ok.includes(o.id));
+    const mine = S.me && done.find(o => o.id === S.me.id); if (mine) { Object.assign(S.me, mine); updateHUD(); }
+    $('#tBody').innerHTML = '<p class="mute">Verificando que los cambios se mantengan en la base de datos…</p>';
+    await new Promise(r => setTimeout(r, 4000));
+    T.rsLast = { done, fail: res.fail, bad: await Store.verifyReset(done) }; T.rs = null; tResetResult();
+  } catch (e) { console.error(e); toast('No se pudo reiniciar: ' + ((e && (e.code || e.message)) || 'error')); tProgreso(); }
+}
+function tResetResult() {
+  const R = T.rsLast; if (!R) return tProgreso();
+  const nm = id => { const x = (T.list || []).find(y => y.id === id); return x ? esc(x.apellidos + ', ' + x.nombres + ' (' + x.grado + '° ' + x.seccion + ')') : esc(id); };
+  const good = R.done.filter(o => !R.bad.includes(o.id)).length;
+  const why = c => /permission/i.test(c) ? 'Firestore no permite escribir (revisa las reglas)' : /unavailable|network|offline/i.test(c) ? 'sin conexión' : esc(c);
+  $('#tBody').innerHTML = `<div class="kpis" style="margin-bottom:12px"><div class="kpi"><b>${good}</b>reiniciados y confirmados</div><div class="kpi"><b>${R.fail.length}</b>no se pudieron escribir</div><div class="kpi"><b>${R.bad.length}</b>sobrescritos después</div></div>
+    ${R.fail.length ? `<div class="say" style="background:#ffe0e0"><b>No se pudieron escribir:</b><ul style="margin:6px 0 0;padding-left:20px">${R.fail.map(f => `<li>${nm(f.id)}: ${why(String(f.err))}</li>`).join('')}</ul></div>` : ''}
+    ${R.bad.length ? `<div class="say" style="background:#fff3cd;margin-top:8px"><b>Volvieron a su progreso anterior:</b> tienen el juego abierto con una versión vieja y lo guardaron encima del reinicio.<ul style="margin:6px 0 0;padding-left:20px">${R.bad.map(id => `<li>${nm(id)}</li>`).join('')}</ul>Pídeles que recarguen la página (Ctrl+Shift+R) y vuelve a reiniciarlos.</div>` : ''}
+    ${!R.fail.length && !R.bad.length ? '<div class="say" style="background:#e6f7ea">✅ Todo quedó reiniciado y confirmado en la base de datos.</div>' : ''}
+    <p class="mute">Si un dispositivo con la versión vieja sigue abierto, puede volver a guardar su progreso más tarde: usa «Comprobar de nuevo» unos minutos después.</p>
+    <div class="row" style="margin-top:10px"><button class="btn alt" data-m="rsCheck">Comprobar de nuevo</button><button class="btn mint" data-m="rsCancel">Volver al progreso</button></div>`;
+}
+async function tResetCheck() {
+  const R = T.rsLast; if (!R) return; $('#tBody').innerHTML = '<p class="mute">Comprobando…</p>';
+  R.bad = await Store.verifyReset(R.done); tResetResult();
 }
 async function tDeleteStudent(id) {
   const st = (T.list || []).find(x => x.id === id); if (!st) return;
@@ -2478,6 +2512,7 @@ $('#modalCard').addEventListener('click', e => {
     case 'trsOne': tResetOne(d.id); break;
     case 'rsCancel': tProgreso(); break;
     case 'rsGo': tResetRun(); break;
+    case 'rsCheck': tResetCheck(); break;
     case 'tpin': tResetPin(d.id); break;
     case 'tnew': renderRetoForm(null); break;
     case 'tedit': renderRetoForm(S.retos.find(r => r.id === d.id)); break;
