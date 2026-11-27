@@ -617,6 +617,21 @@ const Store = {
     }
     const all = this._get('ms_students', {}); all[s.id] = s; this._set('ms_students', all);
   },
+  watchMe(me) {
+    this.unwatchMe(); if (this.mode !== 'online' || !me) return;
+    try {
+      this._w = this.db.collection('students').doc(me.id).onSnapshot(sn => {
+        if (sn.metadata.hasPendingWrites || !sn.exists || !S.me || S.me.id !== me.id) return;
+        const r = sn.data(); if ((r.resetAt || 0) <= (S.me.resetAt || 0)) return;
+        const m = S.me; Object.keys(m).forEach(k => delete m[k]); Object.assign(m, r);
+        ['ok', 'temas', 'stats', 'res', 'bosses', 'lessons', 'comp', 'evals', 'rec', 'hist'].forEach(k => { m[k] = m[k] || {}; });
+        ['owned', 'badges', 'city', 'mis'].forEach(k => { m[k] = m[k] || []; });
+        ensureWeek(m); setPlayerAvatar(m.avatar); updateHUD(); this._allc = null; this._rk = {};
+        toast('Tu docente reinició el ranking y el progreso. Tu cuenta ya está actualizada.');
+      }, e => console.warn(e));
+    } catch (e) { console.warn(e); }
+  },
+  unwatchMe() { if (this._w) { try { this._w(); } catch (e) { /* nada */ } this._w = null; } },
   async resetStudents(list) {
     if (this.mode === 'online') {
       for (let i = 0; i < list.length; i += 400) { const b = this.db.batch(); list.slice(i, i + 400).forEach(x => b.set(this.db.collection('students').doc(x.id), x)); await b.commit(); }
@@ -1855,6 +1870,7 @@ $('#loginCard').addEventListener('submit', async e => {
     }
     st.owned = st.owned || []; st.ok = st.ok || {}; st.temas = st.temas || {}; st.stats = st.stats || {}; st.badges = st.badges || []; st.res = st.res || {}; st.city = st.city || []; st.bosses = st.bosses || {}; st.lessons = st.lessons || {}; st.comp = st.comp || {}; st.evals = st.evals || {}; st.rec = st.rec || {};
     ensureWeek(st); S.me = st; setPlayerAvatar(st.avatar); S.bim = allowedBim(st.bim); applyWorld(S.bim);
+    Store.watchMe(st);
     pinReset();
     if (nuevo) enterCreator(true); else enterPlay();
   } catch (err) { console.error(err); toast('No se pudo conectar. Revisa tu internet e inténtalo de nuevo.'); }
@@ -1881,7 +1897,7 @@ function enterCreator(first) {
   renderCreator();
 }
 function logout() {
-  teamStop(); liveStop();
+  Store.unwatchMe(); teamStop(); liveStop();
   if (S.world === 'area') exitArea();
   persist(true); S.me = null; S.mode = 'menu'; S.near = null;
   if (player) { scene.remove(player); player = null; }
